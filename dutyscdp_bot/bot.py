@@ -73,7 +73,7 @@ class DutyBot:
             LOGGER.warning("Unknown contact key %s", contact_key)
             return False
         LOGGER.info("Sending ping message to %s (%s)", contact.full_name, contact.ldap)
-        await self._client.send_message(self._config.loop.admin_group_id, self._build_initial_message(contact))
+        await self._client.send_message(self._config.loop.channel_id, self._build_initial_message(contact))
         LOGGER.info("Ping message for %s sent", contact_key)
         return True
 
@@ -92,7 +92,7 @@ class DutyBot:
 
     async def _send_initial_message(self, contact: Contact) -> ReminderSession:
         response = await self._client.send_message(
-            self._config.loop.admin_group_id, self._build_initial_message(contact)
+            self._config.loop.channel_id, self._build_initial_message(contact)
         )
         message_id = response["id"]
         thread_id = response.get("root_id") or message_id
@@ -118,7 +118,7 @@ class DutyBot:
         if not self._session:
             return
         reminder_message = f"@{self._session.contact.ldap} напомню, что сегодня твоя дежурная смена. Напиши @take в ответном треде"
-        await self._client.send_message(self._config.loop.admin_group_id, reminder_message, root_id=self._session.thread_id)
+        await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
     async def handle_event(self, event: dict) -> None:
         if not self._session or self._session.acknowledged:

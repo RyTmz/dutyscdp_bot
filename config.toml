@@ -1,5 +1,6 @@
 [loop]
 token = "123"
+channel_id = "ax133urt6ffaic6mgdy6br33jo"
 admin_group_id = "6f13unqm4tff9moebxes8s4nqo"
 server_url = "https://lemanapro.loop.ru"
 team = "lemanapro"
