@@ -4,13 +4,13 @@ import asyncio
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
-from typing import Callable
+from typing import Callable, Tuple
 
 from .bot import DutyBot
 
 
 class _WebhookHandler(BaseHTTPRequestHandler):
-    def __init__(self, *args, callback: Callable[[dict], None], **kwargs):
+    def __init__(self, *args, callback: Callable[[str, dict], Tuple[int, dict]], **kwargs):
         self._callback = callback
         super().__init__(*args, **kwargs)
 
@@ -23,11 +23,11 @@ class _WebhookHandler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.end_headers()
             return
-        self._callback(payload)
-        self.send_response(200)
+        status, response = self._callback(self.path, payload)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b"{\"status\": \"ok\"}")
+        self.wfile.write(json.dumps(response).encode("utf-8"))
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
         return  # silence default stdout logging
@@ -48,8 +48,39 @@ class WebhookServer:
 
         return factory
 
-    def _handle_payload(self, payload: dict) -> None:
-        asyncio.run_coroutine_threadsafe(self._bot.handle_event(payload), self._loop)
+    def _handle_payload(self, path: str, payload: dict) -> Tuple[int, dict]:
+        normalized_path = path.rstrip("/") or "/"
+        if normalized_path == "/trigger":
+            contact_key = payload.get("contact")
+            if not contact_key:
+                return 400, {"status": "error", "error": "Missing contact"}
+            future = asyncio.run_coroutine_threadsafe(self._bot.trigger_contact(str(contact_key)), self._loop)
+            try:
+                scheduled = future.result(timeout=5)
+            except Exception as exc:  # pragma: no cover - propagated as server error
+                return 500, {"status": "error", "error": str(exc)}
+            if not scheduled:
+                return 409, {"status": "error", "error": "Session already in progress or contact unknown"}
+            return 200, {"status": "ok", "message": "Reminder started"}
+
+        if normalized_path == "/ping":
+            contact_key = payload.get("contact")
+            if not contact_key:
+                return 400, {"status": "error", "error": "Missing contact"}
+            future = asyncio.run_coroutine_threadsafe(self._bot.ping_contact(str(contact_key)), self._loop)
+            try:
+                sent = future.result(timeout=5)
+            except Exception as exc:  # pragma: no cover - propagated as server error
+                return 500, {"status": "error", "error": str(exc)}
+            if not sent:
+                return 404, {"status": "error", "error": "Contact unknown"}
+            return 200, {"status": "ok", "message": "Ping sent"}
+
+        if normalized_path in {"/", ""}:
+            asyncio.run_coroutine_threadsafe(self._bot.handle_event(payload), self._loop)
+            return 200, {"status": "ok"}
+
+        return 404, {"status": "error", "error": "Not found"}
 
     def start(self) -> None:
         handler = self._handler_factory()

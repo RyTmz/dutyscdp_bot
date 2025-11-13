@@ -27,6 +27,7 @@ class DutyBot:
         self._config = config
         self._client = client
         self._session: Optional[ReminderSession] = None
+        self._session_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
         self._ack_event = asyncio.Event()
 
@@ -52,17 +53,54 @@ class DutyBot:
             LOGGER.warning("No duty contact configured for %s", today)
             return
         LOGGER.info("Notifying duty contact %s (%s)", contact.full_name, contact.ldap)
-        self._session = await self._send_initial_message(contact)
-        self._ack_event.clear()
-        await self._reminder_loop()
+        await self._run_session(contact)
+
+    async def trigger_contact(self, contact_key: str) -> bool:
+        contact = self._config.contacts.get(contact_key)
+        if not contact:
+            LOGGER.warning("Unknown contact key %s", contact_key)
+            return False
+        if self._session_task and not self._session_task.done():
+            LOGGER.warning("Cannot trigger %s because a reminder session is already in progress", contact_key)
+            return False
+        task = asyncio.create_task(self._run_session(contact))
+        self._session_task = task
+        return True
+
+    async def ping_contact(self, contact_key: str) -> bool:
+        contact = self._config.contacts.get(contact_key)
+        if not contact:
+            LOGGER.warning("Unknown contact key %s", contact_key)
+            return False
+        await self._client.send_message(self._config.loop.admin_group_id, self._build_initial_message(contact))
+        return True
+
+    async def _run_session(self, contact: Contact) -> None:
+        current_task = asyncio.current_task()
+        if current_task:
+            self._session_task = current_task
+        try:
+            self._session = await self._send_initial_message(contact)
+            self._ack_event.clear()
+            await self._reminder_loop()
+        finally:
+            self._session = None
+            if self._session_task is current_task:
+                self._session_task = None
 
     async def _send_initial_message(self, contact: Contact) -> ReminderSession:
-        message = f"@{contact.ldap} Доброе утро. Ты сегодня дежурный, напиши @take в чат, чтобы я понял что ты увидел это сообщение"
-        response = await self._client.send_message(self._config.loop.admin_group_id, message)
+        response = await self._client.send_message(
+            self._config.loop.admin_group_id, self._build_initial_message(contact)
+        )
         message_id = response["id"]
         thread_id = response.get("root_id") or message_id
         LOGGER.debug("Initial message sent with id %s", message_id)
         return ReminderSession(contact=contact, thread_id=thread_id, message_id=message_id, started_at=datetime.utcnow())
+
+    def _build_initial_message(self, contact: Contact) -> str:
+        return (
+            f"@{contact.ldap} Доброе утро. Ты сегодня дежурный, напиши @take в чат, чтобы я понял что ты увидел это сообщение"
+        )
 
     async def _reminder_loop(self) -> None:
         interval = self._config.notification.reminder_interval_minutes * 60
@@ -73,7 +111,6 @@ class DutyBot:
             except asyncio.TimeoutError:
                 LOGGER.info("No acknowledgement yet from %s, sending reminder", self._session.contact.ldap)
                 await self._send_reminder()
-        self._session = None
 
     async def _send_reminder(self) -> None:
         if not self._session:
