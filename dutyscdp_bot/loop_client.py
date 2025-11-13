@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import ssl
 import urllib.request
 from typing import Any, Dict, Optional
+
+from urllib.error import HTTPError, URLError
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class LoopClient:
@@ -23,15 +29,32 @@ class LoopClient:
     def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self._base_url}{path}"
         data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "X-Loop-Team": self._team,
+            "Content-Type": "application/json",
+        }
+        headers_for_log = headers.copy()
+        if "Authorization" in headers_for_log:
+            headers_for_log["Authorization"] = "<redacted>"
+        LOGGER.info("POST %s headers=%s payload=%s", url, headers_for_log, payload)
         req = urllib.request.Request(
             url,
             data=data,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "X-Loop-Team": self._team,
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, context=self._ssl_context) as resp:  # type: ignore[arg-type]
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, context=self._ssl_context) as resp:  # type: ignore[arg-type]
+                body = resp.read().decode("utf-8")
+                LOGGER.debug("Response %s %s", getattr(resp, "status", "?"), body)
+                return json.loads(body)
+        except HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            LOGGER.error(
+                "HTTP error while posting to %s: %s %s", url, exc, error_body or "<empty body>"
+            )
+            raise
+        except URLError as exc:
+            LOGGER.error("Failed to reach %s: %s", url, exc)
+            raise
