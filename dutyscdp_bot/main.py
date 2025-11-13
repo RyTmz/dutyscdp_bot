@@ -27,8 +27,12 @@ async def _run(config_path: str, webhook_host: str, webhook_port: int) -> None:
         bot.stop()
         stop_event.set()
 
-    loop.add_signal_handler(signal.SIGTERM, _handle_signal)
-    loop.add_signal_handler(signal.SIGINT, _handle_signal)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _handle_signal)
+        except NotImplementedError:
+            logging.getLogger(__name__).warning("Signal handlers not supported on this platform; use Ctrl+C to stop")
+            break
 
     await asyncio.gather(bot.start(), stop_event.wait())
     server.stop()
