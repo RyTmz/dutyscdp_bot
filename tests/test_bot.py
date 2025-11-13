@@ -26,7 +26,13 @@ def bot_config() -> BotConfig:
     contact = Contact(key="alice", ldap="alice.ldap", full_name="Alice")
     contacts = {contact.key: contact}
     return BotConfig(
-        loop=LoopSettings(token="t", admin_group_id="channel", server_url="https://loop", team="team"),
+        loop=LoopSettings(
+            token="t",
+            channel_id="main",
+            admin_group_id="channel",
+            server_url="https://loop",
+            team="team",
+        ),
         notification=NotificationSettings(daily_time=time(hour=8, minute=50), timezone="UTC", reminder_interval_minutes=1),
         contacts=contacts,
         schedule=Schedule(weekday_to_contact={0: contact}),
