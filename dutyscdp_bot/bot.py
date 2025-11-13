@@ -72,7 +72,9 @@ class DutyBot:
         if not contact:
             LOGGER.warning("Unknown contact key %s", contact_key)
             return False
+        LOGGER.info("Sending ping message to %s (%s)", contact.full_name, contact.ldap)
         await self._client.send_message(self._config.loop.admin_group_id, self._build_initial_message(contact))
+        LOGGER.info("Ping message for %s sent", contact_key)
         return True
 
     async def _run_session(self, contact: Contact) -> None:
