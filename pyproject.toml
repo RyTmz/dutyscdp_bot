@@ -1,0 +1,17 @@
+[project]
+name = "dutyscdp-bot"
+version = "0.1.0"
+description = "Loop duty notification bot"
+requires-python = ">=3.10"
+dependencies = [
+    "tomli; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,1 +1,53 @@
-# dutyscdp_bot
+# Duty SCDP bot
+
+Бот тегает ответственного дежурного в Loop чате каждый день в 08:50 (или в другое время из конфигурации), пока тот не ответит `@take`.
+
+## Возможности
+
+- чтение расписания дежурств и списка сотрудников из `config.toml` (значения можно переопределять переменными окружения `LOOP_*`);
+- ежедневное отправление первого сообщения дежурному в общий чат Loop;
+- повтор напоминания каждые 15 минут в треде до тех пор, пока дежурный не напишет `@take`;
+- обработка входящих сообщений через встроенный HTTP веб‑хук (порт и адрес задаются параметрами запуска).
+
+## Конфигурация
+
+`config.toml` содержит все настройки. Пример:
+
+```toml
+[loop]
+token = "123"
+admin_group_id = "6f13unqm4tff9moebxes8s4nqo"
+server_url = "https://lemanapro.loop.ru"
+team = "lemanapro"
+
+[notification]
+time = "08:50"
+timezone = "Europe/Moscow"
+reminder_interval_minutes = 15
+
+[contacts.alice]
+ldap = "alice.petrov"
+full_name = "Алиса Петрова"
+
+[schedule]
+monday = "alice"
+```
+
+Полный файл можно посмотреть в репозитории (`config.toml`).
+
+## Запуск
+
+```bash
+python -m dutyscdp_bot.main --config config.toml --webhook-port 8080
+```
+
+## Настройка Loop
+
+Необходимые переменные окружения (или значения в конфиге):
+
+- `LOOP_TOKEN`
+- `LOOP_ADMIN_GROUP_ID`
+- `LOOP_SERVER_URL` (по умолчанию `https://lemanapro.loop.ru`)
+- `LOOP_TEAM` (по умолчанию `lemanapro`)
+
+Loop должен быть сконфигурирован на отправку webhook-событий (сообщений из группы) на эндпоинт `/` того HTTP сервера, который запускает бот.

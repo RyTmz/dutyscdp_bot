@@ -1,0 +1,1 @@
+"""Duty scheduler bot package."""
