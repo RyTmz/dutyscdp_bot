@@ -23,6 +23,8 @@ class ReminderSession:
 
 
 class DutyBot:
+    _ACK_MESSAGE = "Команда принята. Хорошего рабочего дня!"
+
     def __init__(self, config: BotConfig, client: LoopClient) -> None:
         self._config = config
         self._client = client
@@ -133,3 +135,8 @@ class DutyBot:
             LOGGER.info("Received take confirmation from %s", user.get("ldap"))
             self._session.acknowledged = True
             self._ack_event.set()
+            await self._client.send_message(
+                self._config.loop.channel_id,
+                self._ACK_MESSAGE,
+                root_id=self._session.thread_id,
+            )
