@@ -9,6 +9,7 @@ def test_load_config(tmp_path):
         """
 [loop]
 token = "token"
+channel_id = "channel"
 admin_group_id = "group"
 server_url = "https://example.com"
 team = "myteam"
