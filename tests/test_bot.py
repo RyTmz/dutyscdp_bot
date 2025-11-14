@@ -69,6 +69,30 @@ def test_trigger_contact_starts_session(bot_config: BotConfig) -> None:
     assert asyncio.run(run()) >= 1
 
 
+def test_take_acknowledgement_sends_confirmation(bot_config: BotConfig) -> None:
+    async def run() -> tuple[list[dict], str]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001 - accessing test internals
+        thread_id = bot._session.thread_id
+        event = {
+            "type": "message",
+            "root_id": thread_id,
+            "user": {"ldap": bot._session.contact.ldap},
+            "text": "@scdp-platform-bot take",
+        }
+        await bot.handle_event(event)
+        if bot._session_task:
+            await bot._session_task
+        return client.messages, thread_id
+
+    messages, thread_id = asyncio.run(run())
+    assert messages[-1]["message"] == "Команда принята. Хорошего рабочего дня!"
+    assert messages[-1]["root_id"] == thread_id
+
+
 def test_trigger_contact_rejects_when_session_active(bot_config: BotConfig) -> None:
     async def run() -> bool:
         bot = DutyBot(bot_config, client=StubLoopClient())
