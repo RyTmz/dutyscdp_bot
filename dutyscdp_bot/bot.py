@@ -128,8 +128,14 @@ class DutyBot:
             return
         if event.get("type") != "message":
             return
-        if event.get("root_id") not in {self._session.thread_id, None}:
-            return
+        root_id = event.get("root_id")
+        event_id = event.get("id")
+        if root_id and root_id != self._session.thread_id:
+            # Some Loop events set ``root_id`` to the message id itself when the
+            # post is not part of a thread. In that case we still want to
+            # accept the acknowledgement.
+            if not event_id or root_id != event_id:
+                return
         text: str = event.get("text", "")
         normalized_text = text.lower()
         has_take_command = bool(re.search(r"\btake\b", normalized_text))

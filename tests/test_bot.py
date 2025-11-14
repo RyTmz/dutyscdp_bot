@@ -115,6 +115,29 @@ def test_any_user_acknowledgement_with_bot_mention(bot_config: BotConfig) -> Non
     assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
 
 
+def test_acknowledgement_outside_thread(bot_config: BotConfig) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001 - accessing test internals
+        event = {
+            "type": "message",
+            "id": "msg-root",
+            "root_id": "msg-root",
+            "user": {"ldap": bot._session.contact.ldap},
+            "text": "@take",
+        }
+        await bot.handle_event(event)
+        if bot._session_task:
+            await bot._session_task
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
+
+
 def test_trigger_contact_rejects_when_session_active(bot_config: BotConfig) -> None:
     async def run() -> bool:
         bot = DutyBot(bot_config, client=StubLoopClient())
