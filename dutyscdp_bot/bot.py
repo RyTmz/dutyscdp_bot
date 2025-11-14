@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
@@ -131,7 +132,9 @@ class DutyBot:
             return
         user = event.get("user", {})
         text: str = event.get("text", "")
-        if user.get("ldap") == self._session.contact.ldap and "@take" in text.lower():
+        normalized_text = text.lower()
+        has_take_command = bool(re.search(r"\btake\b", normalized_text))
+        if user.get("ldap") == self._session.contact.ldap and has_take_command:
             LOGGER.info("Received take confirmation from %s", user.get("ldap"))
             self._session.acknowledged = True
             self._ack_event.set()

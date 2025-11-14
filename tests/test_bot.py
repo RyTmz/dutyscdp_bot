@@ -81,7 +81,7 @@ def test_take_acknowledgement_sends_confirmation(bot_config: BotConfig) -> None:
             "type": "message",
             "root_id": thread_id,
             "user": {"ldap": bot._session.contact.ldap},
-            "text": "@take",
+            "text": "@scdp-platform-bot take",
         }
         await bot.handle_event(event)
         if bot._session_task:
