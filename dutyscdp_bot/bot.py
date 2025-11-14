@@ -130,11 +130,12 @@ class DutyBot:
             return
         if event.get("root_id") not in {self._session.thread_id, None}:
             return
-        user = event.get("user", {})
         text: str = event.get("text", "")
         normalized_text = text.lower()
         has_take_command = bool(re.search(r"\btake\b", normalized_text))
-        if user.get("ldap") == self._session.contact.ldap and has_take_command:
+        user = event.get("user", {})
+        bot_is_mentioned = "@scdp-platform-bot" in normalized_text
+        if has_take_command and (user.get("ldap") == self._session.contact.ldap or bot_is_mentioned):
             LOGGER.info("Received take confirmation from %s", user.get("ldap"))
             self._session.acknowledged = True
             self._ack_event.set()
