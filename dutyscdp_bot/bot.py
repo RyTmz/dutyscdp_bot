@@ -25,6 +25,7 @@ class ReminderSession:
 
 class DutyBot:
     _ACK_MESSAGE = "Команда принята. Хорошего рабочего дня!"
+    _BOT_USERNAME = "scdp-platform-bot"
 
     def __init__(self, config: BotConfig, client: LoopClient) -> None:
         self._config = config
@@ -139,8 +140,10 @@ class DutyBot:
         text: str = event.get("text", "")
         normalized_text = text.lower()
         has_take_command = bool(re.search(r"\btake\b", normalized_text))
-        user = event.get("user", {})
-        bot_is_mentioned = "@scdp-platform-bot" in normalized_text
+        user = event.get("user") or {}
+        if not isinstance(user, dict):
+            user = {}
+        bot_is_mentioned = self._is_bot_mentioned(event, normalized_text)
         if has_take_command and (user.get("ldap") == self._session.contact.ldap or bot_is_mentioned):
             LOGGER.info("Received take confirmation from %s", user.get("ldap"))
             self._session.acknowledged = True
@@ -150,3 +153,33 @@ class DutyBot:
                 self._ACK_MESSAGE,
                 root_id=self._session.thread_id,
             )
+
+    def _is_bot_mentioned(self, event: dict, normalized_text: str) -> bool:
+        if self._BOT_USERNAME in normalized_text:
+            return True
+        mentions = event.get("mentions")
+        if mentions and self._is_bot_listed_in_mentions(mentions):
+            return True
+        props = event.get("props") or {}
+        mention_keys = props.get("mention_keys")
+        if mention_keys and self._is_bot_listed_in_mentions(mention_keys):
+            return True
+        return False
+
+    def _is_bot_listed_in_mentions(self, mentions: object) -> bool:
+        if isinstance(mentions, (list, tuple)):
+            for mention in mentions:
+                name = ""
+                if isinstance(mention, str):
+                    name = mention
+                elif isinstance(mention, dict):
+                    name = (
+                        mention.get("name")
+                        or mention.get("username")
+                        or mention.get("key")
+                        or mention.get("text")
+                        or ""
+                    )
+                if self._BOT_USERNAME in name.lower():
+                    return True
+        return False

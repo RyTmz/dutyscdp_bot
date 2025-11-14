@@ -115,6 +115,52 @@ def test_any_user_acknowledgement_with_bot_mention(bot_config: BotConfig) -> Non
     assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
 
 
+def test_any_user_acknowledgement_with_structured_mentions(bot_config: BotConfig) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001 - accessing test internals
+        event = {
+            "type": "message",
+            "root_id": bot._session.thread_id,
+            "user": {"ldap": "random.user"},
+            "text": "<@U123> take",
+            "mentions": [{"username": "scdp-platform-bot"}],
+        }
+        await bot.handle_event(event)
+        if bot._session_task:
+            await bot._session_task
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
+
+
+def test_any_user_acknowledgement_with_props_mentions(bot_config: BotConfig) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001 - accessing test internals
+        event = {
+            "type": "message",
+            "root_id": bot._session.thread_id,
+            "user": {"ldap": "random.user"},
+            "text": "take",
+            "props": {"mention_keys": ["@alice", "@scdp-platform-bot"]},
+        }
+        await bot.handle_event(event)
+        if bot._session_task:
+            await bot._session_task
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
+
+
 def test_acknowledgement_outside_thread(bot_config: BotConfig) -> None:
     async def run() -> list[dict]:
         client = StubLoopClient()
