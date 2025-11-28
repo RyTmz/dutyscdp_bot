@@ -97,9 +97,12 @@ class DutyBot:
         finally:
             self._session = None
             if self._thread_poll_task:
-                self._thread_poll_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await self._thread_poll_task
+                try:
+                    await asyncio.wait_for(self._thread_poll_task, timeout=1)
+                except asyncio.TimeoutError:
+                    self._thread_poll_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await self._thread_poll_task
                 self._thread_poll_task = None
             if self._session_task is current_task:
                 self._session_task = None
