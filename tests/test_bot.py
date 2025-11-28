@@ -12,6 +12,7 @@ from dutyscdp_bot.config import BotConfig, Contact, LoopSettings, NotificationSe
 class StubLoopClient:
     def __init__(self) -> None:
         self.messages: list[dict] = []
+        self.thread_events: list[list[dict]] = []
 
     async def send_message(self, channel_id: str, message: str, *, root_id: str | None = None) -> dict:
         self.messages.append({"channel_id": channel_id, "message": message, "root_id": root_id})
@@ -19,6 +20,11 @@ class StubLoopClient:
         if root_id:
             response["root_id"] = root_id
         return response
+
+    async def fetch_thread_events(self, thread_id: str) -> list[dict]:
+        if self.thread_events:
+            return self.thread_events.pop(0)
+        return []
 
 
 @pytest.fixture()
@@ -224,3 +230,32 @@ def test_ping_contact_sends_message(bot_config: BotConfig) -> None:
     messages = asyncio.run(run())
     assert len(messages) == 1
     assert "@alice.ldap" in messages[0]["message"]
+
+
+def test_polling_detects_acknowledgement(bot_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        monkeypatch.setattr(DutyBot, "_THREAD_POLL_INTERVAL_SECONDS", 0.01)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001
+        thread_id = bot._session.thread_id
+        client.thread_events.append(
+            [
+                {
+                    "type": "message",
+                    "id": "msg-poll",
+                    "root_id": thread_id,
+                    "user": {"ldap": bot._session.contact.ldap},
+                    "text": "@take",
+                }
+            ]
+        )
+        await asyncio.sleep(0.05)
+        if bot._session_task:
+            await bot._session_task
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
