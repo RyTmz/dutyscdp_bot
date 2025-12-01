@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Set
 
 from .config import BotConfig, Contact
 from .loop_client import LoopClient
@@ -21,17 +22,20 @@ class ReminderSession:
     message_id: str
     started_at: datetime
     acknowledged: bool = False
+    processed_post_ids: Set[str] = field(default_factory=set)
 
 
 class DutyBot:
     _ACK_MESSAGE = "Команда принята. Хорошего рабочего дня!"
     _BOT_USERNAME = "scdp-platform-bot"
+    _THREAD_POLL_INTERVAL_SECONDS = 5
 
     def __init__(self, config: BotConfig, client: LoopClient) -> None:
         self._config = config
         self._client = client
         self._session: Optional[ReminderSession] = None
         self._session_task: Optional[asyncio.Task[None]] = None
+        self._thread_poll_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
         self._ack_event = asyncio.Event()
 
@@ -88,9 +92,18 @@ class DutyBot:
         try:
             self._session = await self._send_initial_message(contact)
             self._ack_event.clear()
+            self._thread_poll_task = asyncio.create_task(self._poll_session_thread())
             await self._reminder_loop()
         finally:
             self._session = None
+            if self._thread_poll_task:
+                try:
+                    await asyncio.wait_for(self._thread_poll_task, timeout=1)
+                except asyncio.TimeoutError:
+                    self._thread_poll_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await self._thread_poll_task
+                self._thread_poll_task = None
             if self._session_task is current_task:
                 self._session_task = None
 
@@ -101,7 +114,14 @@ class DutyBot:
         message_id = response["id"]
         thread_id = response.get("root_id") or message_id
         LOGGER.debug("Initial message sent with id %s", message_id)
-        return ReminderSession(contact=contact, thread_id=thread_id, message_id=message_id, started_at=datetime.utcnow())
+        session = ReminderSession(
+            contact=contact,
+            thread_id=thread_id,
+            message_id=message_id,
+            started_at=datetime.utcnow(),
+        )
+        session.processed_post_ids.add(message_id)
+        return session
 
     def _build_initial_message(self, contact: Contact) -> str:
         return (
@@ -123,6 +143,35 @@ class DutyBot:
             return
         reminder_message = f"@{self._session.contact.ldap} напомню, что сегодня твоя дежурная смена. Напиши @take в ответном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
+
+    async def _poll_session_thread(self) -> None:
+        while not self._stop_event.is_set():
+            session = self._session
+            if not session or session.acknowledged:
+                break
+            try:
+                events = await self._client.fetch_thread_events(session.thread_id)
+            except Exception:  # pragma: no cover - logged for observability
+                LOGGER.exception("Failed to fetch thread %s", session.thread_id)
+                events = []
+            for event in events:
+                if not self._session or self._session is not session:
+                    break
+                event_id = event.get("id")
+                if event_id and event_id in session.processed_post_ids:
+                    continue
+                if event_id:
+                    session.processed_post_ids.add(event_id)
+                await self.handle_event(event)
+                if not self._session or self._session.acknowledged:
+                    break
+            if not self._session or self._session.acknowledged:
+                break
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=self._THREAD_POLL_INTERVAL_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                continue
 
     async def handle_event(self, event: dict) -> None:
         if not self._session or self._session.acknowledged:
