@@ -1,0 +1,6 @@
+# Placeholder lock file. Regenerate with `poetry lock` when package indexes are reachable.
+
+[metadata]
+lock-version = "2.0"
+python-versions = ">=3.10"
+content-hash = "placeholder"

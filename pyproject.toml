@@ -15,3 +15,15 @@ dev = [
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[[tool.poetry.source]]
+name = "art"
+url = "https://art.lmru.tech/artifactory/api/pypi/python-remote-pypi/simple"
+priority = "primary"
+
+
+[[tool.poetry.source]]
+name = "dostovernost"
+url = "https://art.lmru.tech/artifactory/api/pypi/pypi-local-dostovernost/simple"
+priority = "supplemental"
+
