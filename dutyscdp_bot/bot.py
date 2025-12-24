@@ -192,6 +192,9 @@ class DutyBot:
         user = event.get("user") or {}
         if not isinstance(user, dict):
             user = {}
+        if self._is_bot_author(user):
+            LOGGER.debug("Ignoring bot-authored message %s", event_id or "<unknown>")
+            return
         bot_is_mentioned = self._is_bot_mentioned(event, normalized_text)
         if has_take_command and (user.get("ldap") == self._session.contact.ldap or bot_is_mentioned):
             LOGGER.info("Received take confirmation from %s", user.get("ldap"))
@@ -214,6 +217,11 @@ class DutyBot:
         if mention_keys and self._is_bot_listed_in_mentions(mention_keys):
             return True
         return False
+
+    def _is_bot_author(self, user: dict) -> bool:
+        username = str(user.get("username", "")).lower()
+        ldap = str(user.get("ldap", "")).lower()
+        return self._BOT_USERNAME in {username, ldap}
 
     def _is_bot_listed_in_mentions(self, mentions: object) -> bool:
         if isinstance(mentions, (list, tuple)):

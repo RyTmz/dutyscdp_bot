@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import time
 
 import pytest
@@ -119,6 +120,32 @@ def test_any_user_acknowledgement_with_bot_mention(bot_config: BotConfig) -> Non
 
     messages = asyncio.run(run())
     assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
+
+
+def test_bot_reminder_does_not_acknowledge_itself(bot_config: BotConfig) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(bot_config, client=client)
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001 - accessing test internals
+        event = {
+            "type": "message",
+            "root_id": bot._session.thread_id,
+            "user": {"username": "scdp-platform-bot", "ldap": "scdp-platform-bot"},
+            "text": "@scdp-platform-bot take",
+        }
+        await bot.handle_event(event)
+        await asyncio.sleep(0)
+        bot.stop()
+        if bot._session_task:
+            bot._session_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await bot._session_task
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert all(message["message"] != "Команда принята. Хорошего рабочего дня!" for message in messages)
 
 
 def test_any_user_acknowledgement_with_structured_mentions(bot_config: BotConfig) -> None:
