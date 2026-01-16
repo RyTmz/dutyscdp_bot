@@ -52,6 +52,7 @@ class NotificationSettings:
     daily_time: time
     timezone: str
     reminder_interval_minutes: int
+    weekends_alerts: bool
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ def load_config(path: str) -> BotConfig:
         daily_time=time(hour=h, minute=m),
         timezone=str(notification_data.get("timezone", "Europe/Moscow")),
         reminder_interval_minutes=int(notification_data.get("reminder_interval_minutes", 15)),
+        weekends_alerts=bool(notification_data.get("weekends_alerts", True)),
     )
     contacts = _load_contacts(raw["contacts"])
     schedule = _load_schedule(raw["schedule"], contacts)

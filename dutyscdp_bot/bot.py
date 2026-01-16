@@ -57,13 +57,16 @@ class DutyBot:
         self._stop_event.set()
 
     async def _notify_today(self) -> None:
+        today = date.today()
+        if not self._config.notification.weekends_alerts and today.weekday() >= 5:
+            LOGGER.info("Skipping duty notifications on weekend (%s)", today)
+            return
         oncall_contacts = await self._load_oncall_contacts()
         if oncall_contacts:
             names = ", ".join(f"{contact.full_name} ({contact.ldap})" for contact in oncall_contacts)
             LOGGER.info("Notifying current on-call contacts: %s", names)
             await self._run_session(oncall_contacts)
             return
-        today = date.today()
         contact = self._config.contact_for(today)
         if not contact:
             LOGGER.warning("No duty contact configured for %s", today)
