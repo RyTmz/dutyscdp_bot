@@ -36,6 +36,7 @@ class Contact:
     key: str
     ldap: str
     full_name: str
+    ldap_oncall: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ def _load_contacts(data: Mapping[str, Mapping[str, str]]) -> Dict[str, Contact]:
             key=key,
             ldap=value["ldap"],
             full_name=value["full_name"],
+            ldap_oncall=str(value.get("ldap_oncall", "")).strip() or None,
         )
     return contacts
 

@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import ssl
-import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -25,8 +24,7 @@ class OnCallClient:
         if not schedule_id:
             LOGGER.warning("Schedule %s not found in Grafana OnCall", schedule_name)
             return []
-        users = await asyncio.to_thread(self._fetch_oncall_users, schedule_id)
-        ldaps = self._extract_ldaps(users)
+        ldaps = await asyncio.to_thread(self._fetch_oncall_usernames, schedule_id)
         if limit > 0:
             return ldaps[:limit]
         return ldaps
@@ -43,43 +41,53 @@ class OnCallClient:
                 return str(schedule.get("id") or schedule.get("pk") or schedule.get("uid") or "")
         return ""
 
-    def _fetch_oncall_users(self, schedule_id: str) -> List[Dict[str, Any]]:
-        try:
-            payload = self._get_json(f"/api/v1/schedules/{schedule_id}/on_call")
-            items = self._extract_items(payload)
-            if items:
-                return items
-        except HTTPError as exc:
-            if exc.code != 404:
-                raise
-        query = urllib.parse.urlencode({"schedule": schedule_id})
-        payload = self._get_json(f"/api/v1/on_call/?{query}")
-        return self._extract_items(payload)
+    def _fetch_oncall_usernames(self, schedule_id: str) -> List[str]:
+        payload = self._get_json(f"/api/v1/schedules/{schedule_id}")
+        user_ids = self._extract_oncall_now_user_ids(payload)
+        return self._fetch_usernames(user_ids)
+
+    def _extract_oncall_now_user_ids(self, payload: Any) -> List[str]:
+        if not isinstance(payload, dict):
+            return []
+        on_call_now = payload.get("on_call_now")
+        if not on_call_now:
+            return []
+        items = on_call_now if isinstance(on_call_now, list) else [on_call_now]
+        user_ids: List[str] = []
+        seen: set[str] = set()
+        for item in items:
+            user_id = ""
+            if isinstance(item, dict):
+                user_id = str(item.get("user_id") or item.get("id") or item.get("pk") or "")
+            elif isinstance(item, (int, str)):
+                user_id = str(item)
+            if user_id and user_id not in seen:
+                user_ids.append(user_id)
+                seen.add(user_id)
+        return user_ids
 
     def _extract_items(self, payload: Any) -> List[Dict[str, Any]]:
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
         if isinstance(payload, dict):
-            for key in ("results", "data", "on_call", "oncall", "users"):
+            for key in ("results", "data", "schedules"):
                 value = payload.get(key)
                 if isinstance(value, list):
                     return [item for item in value if isinstance(item, dict)]
         return []
 
-    def _extract_ldaps(self, users: List[Dict[str, Any]]) -> List[str]:
-        ldaps: List[str] = []
+    def _fetch_usernames(self, user_ids: List[str]) -> List[str]:
+        usernames: List[str] = []
         seen: set[str] = set()
-        for item in users:
-            ldap = self._extract_ldap(item)
-            if ldap and ldap not in seen:
-                ldaps.append(ldap)
-                seen.add(ldap)
-        return ldaps
-
-    def _extract_ldap(self, item: Dict[str, Any]) -> str:
-        if "user" in item and isinstance(item["user"], dict):
-            return self._extract_ldap_from_user(item["user"])
-        return self._extract_ldap_from_user(item)
+        for user_id in user_ids:
+            payload = self._get_json(f"/api/v1/users/{user_id}")
+            if not isinstance(payload, dict):
+                continue
+            username = self._extract_ldap_from_user(payload)
+            if username and username not in seen:
+                usernames.append(username)
+                seen.add(username)
+        return usernames
 
     def _extract_ldap_from_user(self, user: Dict[str, Any]) -> str:
         for key in ("username", "user_name", "login", "name", "email"):
