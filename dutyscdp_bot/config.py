@@ -54,11 +54,19 @@ class NotificationSettings:
 
 
 @dataclass(frozen=True)
+class OnCallSettings:
+    token: str
+    base_url: str
+    schedule_name: str
+
+
+@dataclass(frozen=True)
 class BotConfig:
     loop: LoopSettings
     notification: NotificationSettings
     contacts: Mapping[str, Contact]
     schedule: Schedule
+    oncall: Optional[OnCallSettings]
 
     def contact_for(self, d: date) -> Optional[Contact]:
         return self.schedule.contact_for(d)
@@ -98,6 +106,18 @@ def _load_schedule(data: Mapping[str, str], contacts: Mapping[str, Contact]) -> 
     return Schedule(weekday_to_contact=weekday_map)
 
 
+def _load_oncall_settings(raw: Mapping[str, object]) -> Optional[OnCallSettings]:
+    data = raw.get("oncall")
+    if not isinstance(data, Mapping):
+        return None
+    token = os.getenv("ONCALL_TOKEN", str(data.get("token", ""))).strip()
+    base_url = os.getenv("ONCALL_BASE_URL", str(data.get("base_url", ""))).strip()
+    schedule_name = os.getenv("ONCALL_SCHEDULE_NAME", str(data.get("schedule_name", ""))).strip()
+    if not token or not base_url or not schedule_name:
+        return None
+    return OnCallSettings(token=token, base_url=base_url, schedule_name=schedule_name)
+
+
 def load_config(path: str) -> BotConfig:
     raw = _read_toml(path)
     loop = _load_loop_settings(raw["loop"])
@@ -110,4 +130,5 @@ def load_config(path: str) -> BotConfig:
     )
     contacts = _load_contacts(raw["contacts"])
     schedule = _load_schedule(raw["schedule"], contacts)
-    return BotConfig(loop=loop, notification=notification, contacts=contacts, schedule=schedule)
+    oncall = _load_oncall_settings(raw)
+    return BotConfig(loop=loop, notification=notification, contacts=contacts, schedule=schedule, oncall=oncall)

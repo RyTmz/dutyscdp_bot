@@ -8,6 +8,7 @@ import signal
 from .bot import DutyBot
 from .config import load_config
 from .loop_client import LoopClient
+from .oncall_client import OnCallClient
 from .server import WebhookServer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -16,7 +17,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def _run(config_path: str, webhook_host: str, webhook_port: int) -> None:
     config = load_config(config_path)
     client = LoopClient(token=config.loop.token, base_url=config.loop.server_url, team=config.loop.team)
-    bot = DutyBot(config=config, client=client)
+    oncall_client = None
+    if config.oncall:
+        oncall_client = OnCallClient(token=config.oncall.token, base_url=config.oncall.base_url)
+    bot = DutyBot(config=config, client=client, oncall_client=oncall_client)
     loop = asyncio.get_running_loop()
     server = WebhookServer(bot, loop, host=webhook_host, port=webhook_port)
     server.start()
