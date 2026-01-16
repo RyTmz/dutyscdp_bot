@@ -38,6 +38,11 @@ configToml: |
   timezone = "Europe/Moscow"
   reminder_interval_minutes = 15
 
+  [oncall]
+  token = ""
+  base_url = "https://obs-grafana-oncall.example.com/138"
+  schedule_name = "Support"
+
   [contacts.alice]
   ldap = "alice.petrov"
   full_name = "Алиса Петрова"

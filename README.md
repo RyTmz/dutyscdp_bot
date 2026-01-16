@@ -5,6 +5,7 @@
 ## Возможности
 
 - чтение расписания дежурств и списка сотрудников из `config.toml` (значения можно переопределять переменными окружения `LOOP_*`);
+- при наличии секции `oncall` в `config.toml` бот читает текущих дежурных из Grafana OnCall;
 - ежедневное отправление первого сообщения дежурному в общий чат Loop;
 - повтор напоминания каждые 15 минут в треде до тех пор, пока дежурный не напишет `@take`;
 - обработка входящих сообщений через встроенный HTTP веб‑хук (порт и адрес задаются параметрами запуска);
@@ -25,6 +26,11 @@ team = "lemanapro"
 time = "08:50"
 timezone = "Europe/Moscow"
 reminder_interval_minutes = 15
+
+[oncall]
+token = "grafana-oncall-token"
+base_url = "https://obs-grafana-oncall.example.com/138"
+schedule_name = "Support"
 
 [contacts.alice]
 ldap = "alice.petrov"
@@ -50,6 +56,12 @@ python -m dutyscdp_bot.main --config config.toml --webhook-port 8080
 - `LOOP_ADMIN_GROUP_ID`
 - `LOOP_SERVER_URL` (по умолчанию `https://lemanapro.loop.ru`)
 - `LOOP_TEAM` (по умолчанию `lemanapro`)
+
+Если нужно забирать дежурных из Grafana OnCall, добавьте секцию `[oncall]` в конфиг и задайте:
+
+- `ONCALL_TOKEN`
+- `ONCALL_BASE_URL`
+- `ONCALL_SCHEDULE_NAME`
 
 Loop должен быть сконфигурирован на отправку webhook-событий (сообщений из группы) на эндпоинт `/` того HTTP сервера, который запускает бот.
 

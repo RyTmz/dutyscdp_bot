@@ -6,9 +6,10 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Optional, Set
+from typing import Iterable, Optional, Set
 
 from .config import BotConfig, Contact
+from .oncall_client import OnCallClient
 from .loop_client import LoopClient
 from .utils import seconds_until
 
@@ -17,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class ReminderSession:
-    contact: Contact
+    contacts: tuple[Contact, ...]
     thread_id: str
     message_id: str
     started_at: datetime
@@ -30,9 +31,10 @@ class DutyBot:
     _BOT_USERNAME = "scdp-platform-bot"
     _THREAD_POLL_INTERVAL_SECONDS = 5
 
-    def __init__(self, config: BotConfig, client: LoopClient) -> None:
+    def __init__(self, config: BotConfig, client: LoopClient, oncall_client: Optional[OnCallClient] = None) -> None:
         self._config = config
         self._client = client
+        self._oncall_client = oncall_client
         self._session: Optional[ReminderSession] = None
         self._session_task: Optional[asyncio.Task[None]] = None
         self._thread_poll_task: Optional[asyncio.Task[None]] = None
@@ -55,13 +57,19 @@ class DutyBot:
         self._stop_event.set()
 
     async def _notify_today(self) -> None:
+        oncall_contacts = await self._load_oncall_contacts()
+        if oncall_contacts:
+            names = ", ".join(f"{contact.full_name} ({contact.ldap})" for contact in oncall_contacts)
+            LOGGER.info("Notifying current on-call contacts: %s", names)
+            await self._run_session(oncall_contacts)
+            return
         today = date.today()
         contact = self._config.contact_for(today)
         if not contact:
             LOGGER.warning("No duty contact configured for %s", today)
             return
         LOGGER.info("Notifying duty contact %s (%s)", contact.full_name, contact.ldap)
-        await self._run_session(contact)
+        await self._run_session([contact])
 
     async def trigger_contact(self, contact_key: str) -> bool:
         contact = self._config.contacts.get(contact_key)
@@ -71,7 +79,7 @@ class DutyBot:
         if self._session_task and not self._session_task.done():
             LOGGER.warning("Cannot trigger %s because a reminder session is already in progress", contact_key)
             return False
-        task = asyncio.create_task(self._run_session(contact))
+        task = asyncio.create_task(self._run_session([contact]))
         self._session_task = task
         return True
 
@@ -81,16 +89,16 @@ class DutyBot:
             LOGGER.warning("Unknown contact key %s", contact_key)
             return False
         LOGGER.info("Sending ping message to %s (%s)", contact.full_name, contact.ldap)
-        await self._client.send_message(self._config.loop.channel_id, self._build_initial_message(contact))
+        await self._client.send_message(self._config.loop.channel_id, self._build_initial_message([contact]))
         LOGGER.info("Ping message for %s sent", contact_key)
         return True
 
-    async def _run_session(self, contact: Contact) -> None:
+    async def _run_session(self, contacts: Iterable[Contact]) -> None:
         current_task = asyncio.current_task()
         if current_task:
             self._session_task = current_task
         try:
-            self._session = await self._send_initial_message(contact)
+            self._session = await self._send_initial_message(contacts)
             self._ack_event.clear()
             self._thread_poll_task = asyncio.create_task(self._poll_session_thread())
             await self._reminder_loop()
@@ -107,15 +115,16 @@ class DutyBot:
             if self._session_task is current_task:
                 self._session_task = None
 
-    async def _send_initial_message(self, contact: Contact) -> ReminderSession:
+    async def _send_initial_message(self, contacts: Iterable[Contact]) -> ReminderSession:
+        contact_list = tuple(contacts)
         response = await self._client.send_message(
-            self._config.loop.channel_id, self._build_initial_message(contact)
+            self._config.loop.channel_id, self._build_initial_message(contact_list)
         )
         message_id = response["id"]
         thread_id = response.get("root_id") or message_id
         LOGGER.debug("Initial message sent with id %s", message_id)
         session = ReminderSession(
-            contact=contact,
+            contacts=contact_list,
             thread_id=thread_id,
             message_id=message_id,
             started_at=datetime.utcnow(),
@@ -123,25 +132,28 @@ class DutyBot:
         session.processed_post_ids.add(message_id)
         return session
 
-    def _build_initial_message(self, contact: Contact) -> str:
-        return (
-            f"@{contact.ldap} Доброе утро. Ты сегодня дежурный, напиши @take в чат, чтобы я понял что ты увидел это сообщение"
-        )
+    def _build_initial_message(self, contacts: Iterable[Contact]) -> str:
+        contact_list = list(contacts)
+        mentions = " ".join(f"@{contact.ldap}" for contact in contact_list)
+        noun = "вы сегодня дежурные" if len(contact_list) > 1 else "ты сегодня дежурный"
+        return f"{mentions} Доброе утро. {noun}, напиши @take в чат, чтобы я понял что ты увидел это сообщение"
 
     async def _reminder_loop(self) -> None:
         interval = self._config.notification.reminder_interval_minutes * 60
         while self._session and not self._session.acknowledged:
             try:
                 await asyncio.wait_for(self._ack_event.wait(), timeout=interval)
-                LOGGER.info("%s acknowledged the duty notification", self._session.contact.ldap)
+                LOGGER.info("Duty notification acknowledged")
             except asyncio.TimeoutError:
-                LOGGER.info("No acknowledgement yet from %s, sending reminder", self._session.contact.ldap)
+                LOGGER.info("No acknowledgement yet from on-call users, sending reminder")
                 await self._send_reminder()
 
     async def _send_reminder(self) -> None:
         if not self._session:
             return
-        reminder_message = f"@{self._session.contact.ldap} напомню, что сегодня твоя дежурная смена. Напиши @take в ответном треде"
+        mentions = " ".join(f"@{contact.ldap}" for contact in self._session.contacts)
+        noun = "ваша дежурная смена" if len(self._session.contacts) > 1 else "твоя дежурная смена"
+        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши @take в ответном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
     async def _poll_session_thread(self) -> None:
@@ -196,8 +208,10 @@ class DutyBot:
             LOGGER.debug("Ignoring bot-authored message %s", event_id or "<unknown>")
             return
         bot_is_mentioned = self._is_bot_mentioned(event, normalized_text)
-        if has_take_command and (user.get("ldap") == self._session.contact.ldap or bot_is_mentioned):
-            LOGGER.info("Received take confirmation from %s", user.get("ldap"))
+        user_ldap = user.get("ldap")
+        known_ldaps = {contact.ldap for contact in self._session.contacts}
+        if has_take_command and (user_ldap in known_ldaps or bot_is_mentioned):
+            LOGGER.info("Received take confirmation from %s", user_ldap)
             self._session.acknowledged = True
             self._ack_event.set()
             await self._client.send_message(
@@ -217,6 +231,21 @@ class DutyBot:
         if mention_keys and self._is_bot_listed_in_mentions(mention_keys):
             return True
         return False
+
+    async def _load_oncall_contacts(self) -> list[Contact]:
+        if not self._oncall_client or not self._config.oncall:
+            return []
+        try:
+            ldaps = await self._oncall_client.fetch_current_oncall(self._config.oncall.schedule_name, limit=2)
+        except Exception:  # pragma: no cover - logged for observability
+            LOGGER.exception("Failed to load on-call users from Grafana OnCall")
+            return []
+        if not ldaps:
+            LOGGER.warning("Grafana OnCall returned no on-call users for schedule %s", self._config.oncall.schedule_name)
+            return []
+        if len(ldaps) < 2:
+            LOGGER.warning("Grafana OnCall returned only %d on-call users", len(ldaps))
+        return [Contact(key=ldap, ldap=ldap, full_name=ldap) for ldap in ldaps]
 
     def _is_bot_author(self, user: dict) -> bool:
         username = str(user.get("username", "")).lower()

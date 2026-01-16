@@ -53,7 +53,7 @@ helm install dutyscdp charts/dutyscdp-bot \
 ## Параметры chart'а
 
 - `image.repository` / `image.tag` — образ контейнера.
-- `configToml` — содержимое файла `config.toml` (обязательно заполнить секцию `[loop]`).
+- `configToml` — содержимое файла `config.toml` (обязательно заполнить секцию `[loop]`, а при использовании Grafana OnCall добавить `[oncall]` с токеном/URL/расписанием).
 - `loopTokenSecretName` — имя `Secret` с токеном Loop.
 - `env` — дополнительные переменные окружения (например, альтернативные секреты).
 - `service.port` — порт HTTP сервера бота.
