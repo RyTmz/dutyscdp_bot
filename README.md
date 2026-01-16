@@ -26,6 +26,7 @@ team = "lemanapro"
 time = "08:50"
 timezone = "Europe/Moscow"
 reminder_interval_minutes = 15
+weekends_alerts = true
 
 [oncall]
 token = "grafana-oncall-token"

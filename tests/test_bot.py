@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import time
+from datetime import date, time
 
 import pytest
 
@@ -40,7 +40,12 @@ def bot_config() -> BotConfig:
             server_url="https://loop",
             team="team",
         ),
-        notification=NotificationSettings(daily_time=time(hour=8, minute=50), timezone="UTC", reminder_interval_minutes=1),
+        notification=NotificationSettings(
+            daily_time=time(hour=8, minute=50),
+            timezone="UTC",
+            reminder_interval_minutes=1,
+            weekends_alerts=True,
+        ),
         contacts=contacts,
         schedule=Schedule(weekday_to_contact={0: contact}),
     )
@@ -257,6 +262,36 @@ def test_ping_contact_sends_message(bot_config: BotConfig) -> None:
     messages = asyncio.run(run())
     assert len(messages) == 1
     assert "@alice.ldap" in messages[0]["message"]
+
+
+def test_notify_today_skips_weekend(bot_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2024, 6, 1)
+
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        notification = NotificationSettings(
+            daily_time=bot_config.notification.daily_time,
+            timezone=bot_config.notification.timezone,
+            reminder_interval_minutes=bot_config.notification.reminder_interval_minutes,
+            weekends_alerts=False,
+        )
+        config = BotConfig(
+            loop=bot_config.loop,
+            notification=notification,
+            contacts=bot_config.contacts,
+            schedule=bot_config.schedule,
+            oncall=bot_config.oncall,
+        )
+        bot = DutyBot(config, client=client)
+        monkeypatch.setattr("dutyscdp_bot.bot.date", FakeDate)
+        await bot._notify_today()
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert messages == []
 
 
 def test_polling_detects_acknowledgement(bot_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
