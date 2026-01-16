@@ -18,10 +18,12 @@ schedule_name = "Support"
 [contacts.alice]
 ldap = "alice.petrov"
 full_name = "Алиса Петрова"
+ldap_oncall = "12345678"
 
 [contacts.bob]
 ldap = "bob.ivanov"
 full_name = "Боб Иванов"
+ldap_oncall = "87654321"
 
 [schedule]
 monday = "alice"

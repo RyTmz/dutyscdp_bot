@@ -245,7 +245,24 @@ class DutyBot:
             return []
         if len(ldaps) < 2:
             LOGGER.warning("Grafana OnCall returned only %d on-call users", len(ldaps))
-        return [Contact(key=ldap, ldap=ldap, full_name=ldap) for ldap in ldaps]
+        contacts = self._map_oncall_ldaps_to_contacts(ldaps)
+        if not contacts:
+            LOGGER.warning("No matching contacts found for on-call LDAPs: %s", ", ".join(ldaps))
+        return contacts
+
+    def _map_oncall_ldaps_to_contacts(self, ldaps: Iterable[str]) -> list[Contact]:
+        contacts: list[Contact] = []
+        for oncall_ldap in ldaps:
+            matched = [
+                contact
+                for contact in self._config.contacts.values()
+                if contact.ldap_oncall and contact.ldap_oncall == oncall_ldap
+            ]
+            if matched:
+                contacts.extend(matched)
+                continue
+            LOGGER.warning("No contact mapping for on-call ldap %s", oncall_ldap)
+        return contacts
 
     def _is_bot_author(self, user: dict) -> bool:
         username = str(user.get("username", "")).lower()
