@@ -254,6 +254,7 @@ class DutyBot:
         text: str = event.get("text", "")
         normalized_text = text.lower()
         has_take_command = bool(re.search(r"\btake\b", normalized_text))
+        has_stop_command = bool(re.search(r"\bstop\b", normalized_text))
         user = event.get("user") or {}
         if not isinstance(user, dict):
             user = {}
@@ -263,6 +264,17 @@ class DutyBot:
         bot_is_mentioned = self._is_bot_mentioned(event, normalized_text)
         user_ldap = user.get("ldap")
         known_ldaps = {contact.ldap for contact in self._session.contacts}
+        if has_stop_command:
+            LOGGER.info("Received stop confirmation from %s", user_ldap)
+            self._session.acknowledged_ldaps.update(known_ldaps)
+            self._session.acknowledged = True
+            self._ack_event.set()
+            await self._client.send_message(
+                self._config.loop.channel_id,
+                self._ACK_MESSAGE,
+                root_id=self._session.thread_id,
+            )
+            return
         if has_take_command and (user_ldap in known_ldaps or bot_is_mentioned):
             LOGGER.info("Received take confirmation from %s", user_ldap)
             if user_ldap in known_ldaps:

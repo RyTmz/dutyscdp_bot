@@ -445,6 +445,34 @@ def test_multi_contact_waits_for_both_acknowledgements(dual_contacts_config: Bot
     assert ack_count == 2
 
 
+
+
+def test_multi_contact_stop_acknowledges_all(dual_contacts_config: BotConfig) -> None:
+    async def run() -> tuple[bool, int]:
+        client = StubLoopClient()
+        bot = DutyBot(dual_contacts_config, client=client)
+        contacts = [dual_contacts_config.contacts["alice"], dual_contacts_config.contacts["bob"]]
+        session_task = asyncio.create_task(bot._run_session(contacts))  # noqa: SLF001
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001
+
+        await bot.handle_event(
+            {
+                "type": "message",
+                "root_id": bot._session.thread_id,
+                "user": {"ldap": "random.user"},
+                "text": "stop",
+            }
+        )
+        acknowledged_after_stop = bool(bot._session and bot._session.acknowledged)  # noqa: SLF001
+        await session_task
+        ack_messages = [message for message in client.messages if message["message"] == "Команда принята. Хорошего рабочего дня!"]
+        return acknowledged_after_stop, len(ack_messages)
+
+    acknowledged_after_stop, ack_count = asyncio.run(run())
+    assert acknowledged_after_stop
+    assert ack_count == 1
+
 def test_multi_contact_reminder_mentions_only_unacknowledged(dual_contacts_config: BotConfig) -> None:
     async def run() -> str:
         client = StubLoopClient()
