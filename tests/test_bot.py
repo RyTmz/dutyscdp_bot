@@ -14,6 +14,13 @@ class StubLoopClient:
     def __init__(self) -> None:
         self.messages: list[dict] = []
         self.thread_events: list[list[dict]] = []
+        self.user_profiles: dict[str, dict] = {
+            "alice.ldap": {"id": "u-alice"},
+            "scdp-platform-bot": {"id": "u-bot"},
+        }
+        self.group_member_ids: set[str] = set()
+        self.added_members: list[list[str]] = []
+        self.removed_members: list[list[str]] = []
 
     async def send_message(self, channel_id: str, message: str, *, root_id: str | None = None) -> dict:
         self.messages.append({"channel_id": channel_id, "message": message, "root_id": root_id})
@@ -27,6 +34,20 @@ class StubLoopClient:
             return self.thread_events.pop(0)
         return []
 
+    async def get_user_by_username(self, username: str) -> dict:
+        return self.user_profiles.get(username, {})
+
+    async def get_group_member_ids(self, group_id: str) -> set[str]:
+        return set(self.group_member_ids)
+
+    async def add_group_members(self, group_id: str, user_ids: list[str]) -> None:
+        self.added_members.append(user_ids)
+        self.group_member_ids.update(user_ids)
+
+    async def remove_group_members(self, group_id: str, user_ids: list[str]) -> None:
+        self.removed_members.append(user_ids)
+        self.group_member_ids.difference_update(user_ids)
+
 
 @pytest.fixture()
 def bot_config() -> BotConfig:
@@ -39,6 +60,7 @@ def bot_config() -> BotConfig:
             admin_group_id="channel",
             server_url="https://loop",
             team="team",
+            duty_group_id="",
         ),
         notification=NotificationSettings(
             daily_time=time(hour=8, minute=50),
@@ -48,6 +70,7 @@ def bot_config() -> BotConfig:
         ),
         contacts=contacts,
         schedule=Schedule(weekday_to_contact={0: contact}),
+        oncall=None,
     )
 
 
@@ -69,7 +92,7 @@ def test_trigger_contact_starts_session(bot_config: BotConfig) -> None:
         event = {
             "type": "message",
             "root_id": bot._session.thread_id,
-            "user": {"ldap": bot._session.contact.ldap},
+            "user": {"ldap": bot._session.contacts[0].ldap},
             "text": "@take",
         }
         await bot.handle_event(event)
@@ -92,7 +115,7 @@ def test_take_acknowledgement_sends_confirmation(bot_config: BotConfig) -> None:
         event = {
             "type": "message",
             "root_id": thread_id,
-            "user": {"ldap": bot._session.contact.ldap},
+            "user": {"ldap": bot._session.contacts[0].ldap},
             "text": "@scdp-platform-bot take",
         }
         await bot.handle_event(event)
@@ -210,7 +233,7 @@ def test_acknowledgement_outside_thread(bot_config: BotConfig) -> None:
             "type": "message",
             "id": "msg-root",
             "root_id": "msg-root",
-            "user": {"ldap": bot._session.contact.ldap},
+            "user": {"ldap": bot._session.contacts[0].ldap},
             "text": "@take",
         }
         await bot.handle_event(event)
@@ -233,7 +256,7 @@ def test_trigger_contact_rejects_when_session_active(bot_config: BotConfig) -> N
                 {
                     "type": "message",
                     "root_id": bot._session.thread_id,
-                    "user": {"ldap": bot._session.contact.ldap},
+                    "user": {"ldap": bot._session.contacts[0].ldap},
                     "text": "@take",
                 }
             )
@@ -309,7 +332,7 @@ def test_polling_detects_acknowledgement(bot_config: BotConfig, monkeypatch: pyt
                     "type": "message",
                     "id": "msg-poll",
                     "root_id": thread_id,
-                    "user": {"ldap": bot._session.contact.ldap},
+                    "user": {"ldap": bot._session.contacts[0].ldap},
                     "text": "@take",
                 }
             ]
@@ -321,3 +344,80 @@ def test_polling_detects_acknowledgement(bot_config: BotConfig, monkeypatch: pyt
 
     messages = asyncio.run(run())
     assert any(message["message"] == "Команда принята. Хорошего рабочего дня!" for message in messages)
+
+
+def test_notify_today_syncs_duty_group(bot_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2024, 3, 4)
+
+    async def run() -> tuple[list[list[str]], list[list[str]]]:
+        client = StubLoopClient()
+        client.group_member_ids = {"u-old", "u-bot"}
+        config = BotConfig(
+            loop=LoopSettings(
+                token=bot_config.loop.token,
+                channel_id=bot_config.loop.channel_id,
+                admin_group_id=bot_config.loop.admin_group_id,
+                duty_group_id="duty-group",
+                server_url=bot_config.loop.server_url,
+                team=bot_config.loop.team,
+            ),
+            notification=bot_config.notification,
+            contacts=bot_config.contacts,
+            schedule=bot_config.schedule,
+            oncall=bot_config.oncall,
+        )
+        bot = DutyBot(config, client=client)
+        monkeypatch.setattr("dutyscdp_bot.bot.date", FakeDate)
+
+        async def noop_run_session(contacts):
+            return None
+
+        monkeypatch.setattr(bot, "_run_session", noop_run_session)
+        await bot._notify_today()
+        return client.added_members, client.removed_members
+
+    added_members, removed_members = asyncio.run(run())
+    assert added_members == [["u-alice"]]
+    assert removed_members == [["u-old"]]
+
+
+def test_trigger_oncall_duty_starts_notify(bot_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def run() -> int:
+        bot = DutyBot(bot_config, client=StubLoopClient())
+        called = 0
+
+        async def fake_notify_today() -> None:
+            nonlocal called
+            called += 1
+
+        monkeypatch.setattr(bot, "_notify_today", fake_notify_today)
+        assert await bot.trigger_oncall_duty()
+        await asyncio.sleep(0)
+        return called
+
+    assert asyncio.run(run()) == 1
+
+
+def test_trigger_oncall_duty_rejects_when_session_active(bot_config: BotConfig) -> None:
+    async def run() -> bool:
+        bot = DutyBot(bot_config, client=StubLoopClient())
+        assert await bot.trigger_contact("alice")
+        await asyncio.sleep(0)
+        second = await bot.trigger_oncall_duty()
+        if bot._session:
+            await bot.handle_event(
+                {
+                    "type": "message",
+                    "root_id": bot._session.thread_id,
+                    "user": {"ldap": bot._session.contacts[0].ldap},
+                    "text": "@take",
+                }
+            )
+        if bot._session_task:
+            await bot._session_task
+        return second
+
+    assert not asyncio.run(run())
