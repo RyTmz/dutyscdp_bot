@@ -87,6 +87,22 @@ class WebhookServer:
             LOGGER.info("Ping request for %s completed", contact_key)
             return 200, {"status": "ok", "message": "Ping sent"}
 
+        if normalized_path == "/duty_oncall":
+            future = asyncio.run_coroutine_threadsafe(self._bot.trigger_oncall_duty(), self._loop)
+            try:
+                started = future.result(timeout=5)
+            except Exception as exc:  # pragma: no cover - propagated as server error
+                LOGGER.exception("Manual on-call duty request failed")
+                return 500, {"status": "error", "error": str(exc)}
+            if not started:
+                LOGGER.warning("Manual on-call duty request rejected")
+                return 409, {
+                    "status": "error",
+                    "error": "Session already in progress or no on-call contacts available",
+                }
+            LOGGER.info("Manual on-call duty request accepted")
+            return 200, {"status": "ok", "message": "On-call duty reminder started"}
+
         if normalized_path in {"/", ""}:
             asyncio.run_coroutine_threadsafe(self._bot.handle_event(payload), self._loop)
             return 200, {"status": "ok"}
