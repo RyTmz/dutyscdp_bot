@@ -202,7 +202,7 @@ class DutyBot:
             return
         mentions = " ".join(f"@{contact.ldap}" for contact in self._session.contacts)
         noun = "ваша дежурная смена" if len(self._session.contacts) > 1 else "твоя дежурная смена"
-        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши take в ответном треде"
+        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши '"'@scdp-platform-bot take'"' в данном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
     async def _poll_session_thread(self) -> None:
