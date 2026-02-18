@@ -99,6 +99,19 @@ class DutyBot:
         LOGGER.info("Ping message for %s sent", contact_key)
         return True
 
+    async def trigger_oncall_duty(self) -> bool:
+        if self._session_task and not self._session_task.done():
+            LOGGER.warning("Cannot start on-call duty flow because a reminder session is already in progress")
+            return False
+        contacts = await self._load_oncall_contacts()
+        if not contacts:
+            LOGGER.warning("Cannot start on-call duty flow because no on-call contacts are available")
+            return False
+        await self._sync_duty_group(contacts)
+        task = asyncio.create_task(self._run_session(contacts))
+        self._session_task = task
+        return True
+
 
     async def _sync_duty_group(self, contacts: Iterable[Contact]) -> None:
         group_id = self._config.loop.admin_group_id.strip()

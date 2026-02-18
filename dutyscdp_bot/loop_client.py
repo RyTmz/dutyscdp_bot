@@ -90,12 +90,15 @@ class LoopClient:
         return response
 
     async def get_group_member_ids(self, group_id: str) -> set[str]:
-        members = await asyncio.to_thread(self._get_json_list, f"/api/v4/groups/{group_id}/members")
-        return {
-            str(member.get("user_id", ""))
-            for member in members
-            if isinstance(member, dict) and str(member.get("user_id", "")).strip()
-        }
+        path = f"/api/v4/groups/{group_id}/members"
+        response = await asyncio.to_thread(self._request_json, path, None, "GET")
+        members = self._extract_group_members(response, path)
+        member_ids: set[str] = set()
+        for member in members:
+            member_id = str(member.get("user_id") or member.get("id") or "").strip()
+            if member_id:
+                member_ids.add(member_id)
+        return member_ids
 
     async def add_group_members(self, group_id: str, user_ids: list[str]) -> None:
         if not user_ids:
@@ -124,6 +127,16 @@ class LoopClient:
         profile = {"id": user_id, "username": username, "ldap": ldap}
         self._user_cache[user_id] = profile
         return profile
+
+
+    def _extract_group_members(self, response: Any, path: str) -> List[Dict[str, Any]]:
+        if isinstance(response, list):
+            return [member for member in response if isinstance(member, dict)]
+        if isinstance(response, dict):
+            raw_members = response.get("members")
+            if isinstance(raw_members, list):
+                return [member for member in raw_members if isinstance(member, dict)]
+        raise TypeError(f"Unexpected response type for {path}: {type(response)!r}")
 
     def _get_json(self, path: str) -> Dict[str, Any]:
         response = self._request_json(path, method="GET")
