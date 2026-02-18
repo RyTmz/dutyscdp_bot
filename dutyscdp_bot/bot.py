@@ -65,6 +65,7 @@ class DutyBot:
         if oncall_contacts:
             names = ", ".join(f"{contact.full_name} ({contact.ldap})" for contact in oncall_contacts)
             LOGGER.info("Notifying current on-call contacts: %s", names)
+            await self._sync_duty_group(oncall_contacts)
             await self._run_session(oncall_contacts)
             return
         contact = self._config.contact_for(today)
@@ -72,7 +73,9 @@ class DutyBot:
             LOGGER.warning("No duty contact configured for %s", today)
             return
         LOGGER.info("Notifying duty contact %s (%s)", contact.full_name, contact.ldap)
-        await self._run_session([contact])
+        duty_contacts = [contact]
+        await self._sync_duty_group(duty_contacts)
+        await self._run_session(duty_contacts)
 
     async def trigger_contact(self, contact_key: str) -> bool:
         contact = self._config.contacts.get(contact_key)
@@ -95,6 +98,49 @@ class DutyBot:
         await self._client.send_message(self._config.loop.channel_id, self._build_initial_message([contact]))
         LOGGER.info("Ping message for %s sent", contact_key)
         return True
+
+
+    async def _sync_duty_group(self, contacts: Iterable[Contact]) -> None:
+        group_id = self._config.loop.admin_group_id.strip()
+        if not group_id:
+            LOGGER.info("Duty group synchronization is disabled: loop.admin_group_id is not configured")
+            return
+        usernames = {contact.ldap for contact in contacts}
+        usernames.add(self._BOT_USERNAME)
+        desired_user_ids: set[str] = set()
+        for username in usernames:
+            try:
+                profile = await self._client.get_user_by_username(username)
+            except Exception:  # pragma: no cover - logged for observability
+                LOGGER.exception("Failed to resolve Loop user id for username %s", username)
+                continue
+            user_id = str(profile.get("id", "")).strip()
+            if not user_id:
+                LOGGER.warning("Loop user profile for %s does not contain id", username)
+                continue
+            desired_user_ids.add(user_id)
+
+        if not desired_user_ids:
+            LOGGER.warning("Skipping duty group sync because no Loop user ids were resolved")
+            return
+
+        try:
+            current_user_ids = await self._client.get_group_member_ids(group_id)
+        except Exception:  # pragma: no cover - logged for observability
+            LOGGER.exception("Failed to load members of Loop group %s", group_id)
+            return
+
+        users_to_add = sorted(desired_user_ids - current_user_ids)
+        users_to_remove = sorted(current_user_ids - desired_user_ids)
+
+        if users_to_remove:
+            await self._client.remove_group_members(group_id, users_to_remove)
+            LOGGER.info("Removed %d user(s) from duty group %s", len(users_to_remove), group_id)
+        if users_to_add:
+            await self._client.add_group_members(group_id, users_to_add)
+            LOGGER.info("Added %d user(s) to duty group %s", len(users_to_add), group_id)
+        if not users_to_add and not users_to_remove:
+            LOGGER.info("Duty group %s is already up to date", group_id)
 
     async def _run_session(self, contacts: Iterable[Contact]) -> None:
         current_task = asyncio.current_task()
