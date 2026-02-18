@@ -185,7 +185,7 @@ class DutyBot:
         contact_list = list(contacts)
         mentions = " ".join(f"@{contact.ldap}" for contact in contact_list)
         noun = "Вы сегодня дежурные и вам необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers), ревьють PR и первично обрабатывать новые задачи на доске" if len(contact_list) > 1 else "Ты сегодня дежурный и тебе необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers)"
-        return f"{mentions} Доброе утро. {noun}, напишите '"'take'"' в данный тред для подтверждения."
+        return f"{mentions} Доброе утро. {noun}, напишите '"'@scdp-platform-bot take'"' в данный тред для подтверждения."
 
     async def _reminder_loop(self) -> None:
         interval = self._config.notification.reminder_interval_minutes * 60
