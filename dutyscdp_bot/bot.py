@@ -23,6 +23,7 @@ class ReminderSession:
     message_id: str
     started_at: datetime
     acknowledged: bool = False
+    acknowledged_ldaps: Set[str] = field(default_factory=set)
     processed_post_ids: Set[str] = field(default_factory=set)
 
 
@@ -200,8 +201,11 @@ class DutyBot:
     async def _send_reminder(self) -> None:
         if not self._session:
             return
-        mentions = " ".join(f"@{contact.ldap}" for contact in self._session.contacts)
-        noun = "ваша дежурная смена" if len(self._session.contacts) > 1 else "твоя дежурная смена"
+        contacts_to_remind = self._contacts_pending_ack(self._session)
+        if not contacts_to_remind:
+            return
+        mentions = " ".join(f"@{contact.ldap}" for contact in contacts_to_remind)
+        noun = "ваша дежурная смена" if len(contacts_to_remind) > 1 else "твоя дежурная смена"
         reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши '"'@scdp-platform-bot take'"' в данном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
@@ -261,13 +265,19 @@ class DutyBot:
         known_ldaps = {contact.ldap for contact in self._session.contacts}
         if has_take_command and (user_ldap in known_ldaps or bot_is_mentioned):
             LOGGER.info("Received take confirmation from %s", user_ldap)
-            self._session.acknowledged = True
-            self._ack_event.set()
+            if user_ldap in known_ldaps:
+                self._session.acknowledged_ldaps.add(user_ldap)
+            if all(contact.ldap in self._session.acknowledged_ldaps for contact in self._session.contacts):
+                self._session.acknowledged = True
+                self._ack_event.set()
             await self._client.send_message(
                 self._config.loop.channel_id,
                 self._ACK_MESSAGE,
                 root_id=self._session.thread_id,
             )
+
+    def _contacts_pending_ack(self, session: ReminderSession) -> list[Contact]:
+        return [contact for contact in session.contacts if contact.ldap not in session.acknowledged_ldaps]
 
     def _is_bot_mentioned(self, event: dict, normalized_text: str) -> bool:
         if self._BOT_USERNAME in normalized_text:

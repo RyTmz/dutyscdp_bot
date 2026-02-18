@@ -60,7 +60,6 @@ def bot_config() -> BotConfig:
             admin_group_id="channel",
             server_url="https://loop",
             team="team",
-            duty_group_id="",
         ),
         notification=NotificationSettings(
             daily_time=time(hour=8, minute=50),
@@ -70,6 +69,31 @@ def bot_config() -> BotConfig:
         ),
         contacts=contacts,
         schedule=Schedule(weekday_to_contact={0: contact}),
+        oncall=None,
+    )
+
+
+@pytest.fixture()
+def dual_contacts_config() -> BotConfig:
+    alice = Contact(key="alice", ldap="alice.ldap", full_name="Alice")
+    bob = Contact(key="bob", ldap="bob.ldap", full_name="Bob")
+    contacts = {alice.key: alice, bob.key: bob}
+    return BotConfig(
+        loop=LoopSettings(
+            token="t",
+            channel_id="main",
+            admin_group_id="channel",
+            server_url="https://loop",
+            team="team",
+        ),
+        notification=NotificationSettings(
+            daily_time=time(hour=8, minute=50),
+            timezone="UTC",
+            reminder_interval_minutes=1,
+            weekends_alerts=True,
+        ),
+        contacts=contacts,
+        schedule=Schedule(weekday_to_contact={0: alice}),
         oncall=None,
     )
 
@@ -360,7 +384,6 @@ def test_notify_today_syncs_duty_group(bot_config: BotConfig, monkeypatch: pytes
                 token=bot_config.loop.token,
                 channel_id=bot_config.loop.channel_id,
                 admin_group_id=bot_config.loop.admin_group_id,
-                duty_group_id="duty-group",
                 server_url=bot_config.loop.server_url,
                 team=bot_config.loop.team,
             ),
@@ -382,3 +405,56 @@ def test_notify_today_syncs_duty_group(bot_config: BotConfig, monkeypatch: pytes
     added_members, removed_members = asyncio.run(run())
     assert added_members == [["u-alice"]]
     assert removed_members == [["u-old"]]
+
+
+def test_multi_contact_waits_for_both_acknowledgements(dual_contacts_config: BotConfig) -> None:
+    async def run() -> tuple[bool, bool, int]:
+        client = StubLoopClient()
+        bot = DutyBot(dual_contacts_config, client=client)
+        contacts = [dual_contacts_config.contacts["alice"], dual_contacts_config.contacts["bob"]]
+        session_task = asyncio.create_task(bot._run_session(contacts))  # noqa: SLF001
+        await asyncio.sleep(0)
+        assert bot._session  # noqa: SLF001
+
+        await bot.handle_event(
+            {
+                "type": "message",
+                "root_id": bot._session.thread_id,
+                "user": {"ldap": contacts[0].ldap},
+                "text": "@scdp-platform-bot take",
+            }
+        )
+        first_ack = bool(bot._session and bot._session.acknowledged)  # noqa: SLF001
+
+        await bot.handle_event(
+            {
+                "type": "message",
+                "root_id": bot._session.thread_id,
+                "user": {"ldap": contacts[1].ldap},
+                "text": "@scdp-platform-bot take",
+            }
+        )
+        second_ack = bool(bot._session and bot._session.acknowledged)  # noqa: SLF001
+        await session_task
+        ack_messages = [message for message in client.messages if message["message"] == "Команда принята. Хорошего рабочего дня!"]
+        return first_ack, second_ack, len(ack_messages)
+
+    first_ack, second_ack, ack_count = asyncio.run(run())
+    assert not first_ack
+    assert second_ack
+    assert ack_count == 2
+
+
+def test_multi_contact_reminder_mentions_only_unacknowledged(dual_contacts_config: BotConfig) -> None:
+    async def run() -> str:
+        client = StubLoopClient()
+        bot = DutyBot(dual_contacts_config, client=client)
+        contacts = [dual_contacts_config.contacts["alice"], dual_contacts_config.contacts["bob"]]
+        bot._session = await bot._send_initial_message(contacts)  # noqa: SLF001
+        bot._session.acknowledged_ldaps.add("alice.ldap")  # noqa: SLF001
+        await bot._send_reminder()  # noqa: SLF001
+        return client.messages[-1]["message"]
+
+    reminder_message = asyncio.run(run())
+    assert "@bob.ldap" in reminder_message
+    assert "@alice.ldap" not in reminder_message
