@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import ssl
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -81,6 +82,31 @@ class LoopClient:
             events.append(event)
         return events
 
+    async def get_user_by_username(self, username: str) -> Dict[str, Any]:
+        encoded_username = urllib.parse.quote(username, safe="")
+        response = await asyncio.to_thread(self._get_json, f"/api/v4/users/username/{encoded_username}")
+        if not response:
+            raise ValueError(f"Loop user {username} not found")
+        return response
+
+    async def get_group_member_ids(self, group_id: str) -> set[str]:
+        members = await asyncio.to_thread(self._get_json_list, f"/api/v4/groups/{group_id}/members")
+        return {
+            str(member.get("user_id", ""))
+            for member in members
+            if isinstance(member, dict) and str(member.get("user_id", "")).strip()
+        }
+
+    async def add_group_members(self, group_id: str, user_ids: list[str]) -> None:
+        if not user_ids:
+            return
+        await asyncio.to_thread(self._post_json, f"/api/v4/groups/{group_id}/members", {"user_ids": user_ids})
+
+    async def remove_group_members(self, group_id: str, user_ids: list[str]) -> None:
+        if not user_ids:
+            return
+        await asyncio.to_thread(self._delete_json, f"/api/v4/groups/{group_id}/members", {"user_ids": user_ids})
+
     async def _get_user_profile(self, user_id: str) -> Dict[str, str]:
         cached = self._user_cache.get(user_id)
         if cached:
@@ -100,10 +126,31 @@ class LoopClient:
         return profile
 
     def _get_json(self, path: str) -> Dict[str, Any]:
+        response = self._request_json(path, method="GET")
+        if not isinstance(response, dict):
+            raise TypeError(f"Unexpected response type for {path}: {type(response)!r}")
+        return response
+
+    def _get_json_list(self, path: str) -> List[Any]:
+        response = self._request_json(path, method="GET")
+        if not isinstance(response, list):
+            raise TypeError(f"Unexpected response type for {path}: {type(response)!r}")
+        return response
+
+    def _delete_json(self, path: str, payload: Dict[str, Any]) -> Any:
+        return self._request_json(path, payload=payload, method="DELETE")
+
+    def _request_json(self, path: str, payload: Optional[Dict[str, Any]] = None, method: str = "GET") -> Any:
+        data: Optional[bytes] = None
+        headers = self._build_headers()
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"{self._base_url}{path}",
-            headers=self._build_headers(),
-            method="GET",
+            data=data,
+            headers=headers,
+            method=method,
         )
         try:
             with urllib.request.urlopen(req, context=self._ssl_context) as resp:  # type: ignore[arg-type]
@@ -112,10 +159,17 @@ class LoopClient:
                 return json.loads(body)
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            LOGGER.error("HTTP error while getting %s%s: %s %s", self._base_url, path, exc, error_body or "<empty body>")
+            LOGGER.error(
+                "HTTP error while requesting %s%s with %s: %s %s",
+                self._base_url,
+                path,
+                method,
+                exc,
+                error_body or "<empty body>",
+            )
             raise
         except URLError as exc:
-            LOGGER.error("Failed to reach %s%s: %s", self._base_url, path, exc)
+            LOGGER.error("Failed to reach %s%s with %s: %s", self._base_url, path, method, exc)
             raise
 
     def _build_headers(self) -> Dict[str, str]:

@@ -27,6 +27,7 @@ class LoopSettings:
     token: str
     channel_id: str
     admin_group_id: str
+    duty_group_id: str
     server_url: str
     team: str
 
@@ -84,6 +85,7 @@ def _load_loop_settings(data: Mapping[str, object]) -> LoopSettings:
         token=os.getenv("LOOP_TOKEN", str(data["token"])),
         channel_id=os.getenv("LOOP_CHANNEL_ID", str(data["channel_id"])),
         admin_group_id=os.getenv("LOOP_ADMIN_GROUP_ID", str(data["admin_group_id"])),
+        duty_group_id=os.getenv("LOOP_DUTY_GROUP_ID", str(data.get("duty_group_id", ""))),
         server_url=os.getenv("LOOP_SERVER_URL", str(data.get("server_url", "https://lemanapro.loop.ru"))),
         team=os.getenv("LOOP_TEAM", str(data.get("team", "lemanapro"))),
     )
