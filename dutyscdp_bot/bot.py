@@ -101,9 +101,9 @@ class DutyBot:
 
 
     async def _sync_duty_group(self, contacts: Iterable[Contact]) -> None:
-        group_id = self._config.loop.duty_group_id.strip()
+        group_id = self._config.loop.admin_group_id.strip()
         if not group_id:
-            LOGGER.info("Duty group synchronization is disabled: loop.duty_group_id is not configured")
+            LOGGER.info("Duty group synchronization is disabled: loop.admin_group_id is not configured")
             return
         usernames = {contact.ldap for contact in contacts}
         usernames.add(self._BOT_USERNAME)
