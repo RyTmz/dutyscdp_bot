@@ -184,8 +184,8 @@ class DutyBot:
     def _build_initial_message(self, contacts: Iterable[Contact]) -> str:
         contact_list = list(contacts)
         mentions = " ".join(f"@{contact.ldap}" for contact in contact_list)
-        noun = "вы сегодня дежурные" if len(contact_list) > 1 else "ты сегодня дежурный"
-        return f"{mentions} Доброе утро. {noun}, напиши @take в чат, чтобы я понял что ты увидел это сообщение"
+        noun = "Вы сегодня дежурные и вам необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers), ревьють PR и первично обрабатывать новые задачи на доске" if len(contact_list) > 1 else "Ты сегодня дежурный и тебе необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers)"
+        return f"{mentions} Доброе утро. {noun}, напишите '"'take'"' в данный тред для подтверждения."
 
     async def _reminder_loop(self) -> None:
         interval = self._config.notification.reminder_interval_minutes * 60
@@ -202,7 +202,7 @@ class DutyBot:
             return
         mentions = " ".join(f"@{contact.ldap}" for contact in self._session.contacts)
         noun = "ваша дежурная смена" if len(self._session.contacts) > 1 else "твоя дежурная смена"
-        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши @take в ответном треде"
+        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши take в ответном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
     async def _poll_session_thread(self) -> None:
