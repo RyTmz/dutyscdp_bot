@@ -71,6 +71,19 @@ class WebhookServer:
             LOGGER.info("Trigger for %s accepted", contact_key)
             return 200, {"status": "ok", "message": "Reminder started"}
 
+        if normalized_path == "/oncall_duty":
+            future = asyncio.run_coroutine_threadsafe(self._bot.trigger_oncall_duty(), self._loop)
+            try:
+                scheduled = future.result(timeout=5)
+            except Exception as exc:  # pragma: no cover - propagated as server error
+                LOGGER.exception("On-call duty trigger failed")
+                return 500, {"status": "error", "error": str(exc)}
+            if not scheduled:
+                LOGGER.warning("On-call duty trigger rejected because session is active")
+                return 409, {"status": "error", "error": "Session already in progress"}
+            LOGGER.info("On-call duty trigger accepted")
+            return 200, {"status": "ok", "message": "On-call duty workflow started"}
+
         if normalized_path == "/ping":
             contact_key = payload.get("contact")
             if not contact_key:
