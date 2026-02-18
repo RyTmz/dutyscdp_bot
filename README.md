@@ -19,7 +19,6 @@
 [loop]
 token = "123"
 admin_group_id = "6f13unqm4tff9moebxes8s4nqo"
-duty_group_id = "6f13unqm4tff9moebxes8s4nqo"
 server_url = "https://lemanapro.loop.ru"
 team = "lemanapro"
 
@@ -56,7 +55,6 @@ python -m dutyscdp_bot.main --config config.toml --webhook-port 8080
 
 - `LOOP_TOKEN`
 - `LOOP_ADMIN_GROUP_ID`
-- `LOOP_DUTY_GROUP_ID` (идентификатор группы, которую бот синхронизирует с текущими дежурными)
 - `LOOP_SERVER_URL` (по умолчанию `https://lemanapro.loop.ru`)
 - `LOOP_TEAM` (по умолчанию `lemanapro`)
 
