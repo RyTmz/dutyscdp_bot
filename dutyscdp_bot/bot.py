@@ -119,23 +119,38 @@ class DutyBot:
         await self._run_session(duty_contacts)
 
     async def _notify_next_week_schedule(self) -> None:
-        message = self._build_next_week_schedule_message()
+        next_monday = self._next_week_monday(date.today())
+        next_sunday = next_monday + timedelta(days=6)
+        oncall_schedule: dict[date, list[Contact]] = {}
+        if self._oncall_client and self._config.oncall:
+            try:
+                oncall_schedule = await self._load_oncall_schedule(next_monday, next_sunday)
+            except Exception:  # pragma: no cover - logged for observability
+                LOGGER.exception("Failed to load next week schedule from Grafana OnCall")
+                oncall_schedule = {}
+        message = self._build_next_week_schedule_message(next_monday, oncall_schedule)
         await self._client.send_message(self._config.loop.channel_id, message)
         LOGGER.info("Weekly schedule message sent")
 
-    def _build_next_week_schedule_message(self) -> str:
-        next_monday = self._next_week_monday(date.today())
+    def _build_next_week_schedule_message(self, next_monday: date, oncall_schedule: dict[date, list[Contact]]) -> str:
+        next_sunday = next_monday + timedelta(days=6)
         lines = [
             "Расписание дежурств на следующую неделю:",
-            f"Период: {next_monday.strftime('%d.%m.%Y')} - {(next_monday + timedelta(days=6)).strftime('%d.%m.%Y')}",
+            f"Период: {next_monday.strftime('%d.%m.%Y')} - {next_sunday.strftime('%d.%m.%Y')}",
             "",
             "| День | Дежурный |",
             "| --- | --- |",
         ]
         for weekday in range(7):
             current_day = next_monday + timedelta(days=weekday)
-            contact = self._config.contact_for(current_day)
-            duty = f"{contact.full_name} (@{contact.ldap})" if contact else "Не назначен"
+            if not self._config.notification.weekends_alerts and weekday >= 5:
+                continue
+            contacts = oncall_schedule.get(current_day, [])
+            if contacts:
+                duty = ", ".join(f"{contact.full_name} (@{contact.ldap})" for contact in contacts)
+            else:
+                contact = self._config.contact_for(current_day)
+                duty = f"{contact.full_name} (@{contact.ldap})" if contact else "Не назначен"
             lines.append(f"| {self._WEEKDAY_LABELS[weekday]} ({current_day.strftime('%d.%m')}) | {duty} |")
         return "\n".join(lines)
 
@@ -383,6 +398,21 @@ class DutyBot:
         if not contacts:
             LOGGER.warning("No matching contacts found for on-call LDAPs: %s", ", ".join(ldaps))
         return contacts
+
+    async def _load_oncall_schedule(self, start_date: date, end_date: date) -> dict[date, list[Contact]]:
+        if not self._oncall_client or not self._config.oncall:
+            return {}
+        raw_schedule = await self._oncall_client.fetch_schedule_for_period(
+            self._config.oncall.schedule_name,
+            start_date,
+            end_date,
+        )
+        schedule: dict[date, list[Contact]] = {}
+        for shift_day, ldaps in raw_schedule.items():
+            mapped_contacts = self._map_oncall_ldaps_to_contacts(ldaps)
+            if mapped_contacts:
+                schedule[shift_day] = mapped_contacts
+        return schedule
 
     def _map_oncall_ldaps_to_contacts(self, ldaps: Iterable[str]) -> list[Contact]:
         contacts: list[Contact] = []
