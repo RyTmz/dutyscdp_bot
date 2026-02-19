@@ -50,6 +50,8 @@ class Schedule:
 @dataclass(frozen=True)
 class NotificationSettings:
     daily_time: time
+    weekly_schedule_weekday: int
+    weekly_schedule_time: time
     timezone: str
     reminder_interval_minutes: int
     weekends_alerts: bool
@@ -126,8 +128,15 @@ def load_config(path: str) -> BotConfig:
     loop = _load_loop_settings(raw["loop"])
     notification_data = raw.get("notification", {})
     h, m = [int(part) for part in str(notification_data.get("time", "08:50")).split(":", maxsplit=1)]
+    weekly_day_alias = str(notification_data.get("weekly_schedule_weekday", "friday")).lower()
+    weekly_weekday = WEEKDAY_ALIASES[weekly_day_alias]
+    weekly_h, weekly_m = [
+        int(part) for part in str(notification_data.get("weekly_schedule_time", "14:00")).split(":", maxsplit=1)
+    ]
     notification = NotificationSettings(
         daily_time=time(hour=h, minute=m),
+        weekly_schedule_weekday=weekly_weekday,
+        weekly_schedule_time=time(hour=weekly_h, minute=weekly_m),
         timezone=str(notification_data.get("timezone", "Europe/Moscow")),
         reminder_interval_minutes=int(notification_data.get("reminder_interval_minutes", 15)),
         weekends_alerts=bool(notification_data.get("weekends_alerts", True)),

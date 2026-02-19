@@ -18,6 +18,8 @@ team = "myteam"
 time = "08:50"
 timezone = "Europe/Moscow"
 reminder_interval_minutes = 15
+weekly_schedule_weekday = "friday"
+weekly_schedule_time = "14:00"
 
 [contacts.alice]
 ldap = "alice"
@@ -33,4 +35,6 @@ monday = "alice"
 
     assert config.loop.team == "myteam"
     assert config.notification.daily_time.hour == 8
+    assert config.notification.weekly_schedule_weekday == 4
+    assert config.notification.weekly_schedule_time.hour == 14
     assert config.contact_for(date(2024, 3, 4)).ldap == "alice"
