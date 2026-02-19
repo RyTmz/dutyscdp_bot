@@ -38,6 +38,8 @@ configToml: |
   timezone = "Europe/Moscow"
   reminder_interval_minutes = 15
   weekends_alerts = true
+  weekly_schedule_weekday = "friday"
+  weekly_schedule_time = "14:00"
 
   [oncall]
   token = ""

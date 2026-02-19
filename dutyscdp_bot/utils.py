@@ -11,3 +11,18 @@ def seconds_until(target_time: time, timezone: str) -> float:
     if target_dt <= now:
         target_dt += timedelta(days=1)
     return (target_dt - now).total_seconds()
+
+
+def seconds_until_weekly(target_weekday: int, target_time: time, timezone: str) -> float:
+    tz = ZoneInfo(timezone)
+    now = datetime.now(tz=tz)
+    days_until = (target_weekday - now.weekday()) % 7
+    target_dt = (now + timedelta(days=days_until)).replace(
+        hour=target_time.hour,
+        minute=target_time.minute,
+        second=0,
+        microsecond=0,
+    )
+    if target_dt <= now:
+        target_dt += timedelta(days=7)
+    return (target_dt - now).total_seconds()

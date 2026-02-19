@@ -5,13 +5,13 @@ import logging
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Iterable, Optional, Set
 
 from .config import BotConfig, Contact
-from .oncall_client import OnCallClient
 from .loop_client import LoopClient
-from .utils import seconds_until
+from .oncall_client import OnCallClient
+from .utils import seconds_until, seconds_until_weekly
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +31,15 @@ class DutyBot:
     _ACK_MESSAGE = "Команда принята. Хорошего рабочего дня!"
     _BOT_USERNAME = "scdp-platform-bot"
     _THREAD_POLL_INTERVAL_SECONDS = 5
+    _WEEKDAY_LABELS = {
+        0: "Понедельник",
+        1: "Вторник",
+        2: "Среда",
+        3: "Четверг",
+        4: "Пятница",
+        5: "Суббота",
+        6: "Воскресенье",
+    }
 
     def __init__(self, config: BotConfig, client: LoopClient, oncall_client: Optional[OnCallClient] = None) -> None:
         self._config = config
@@ -43,10 +52,29 @@ class DutyBot:
         self._ack_event = asyncio.Event()
 
     async def start(self) -> None:
-        LOGGER.info("Duty bot is starting. Notifications scheduled at %s %s", self._config.notification.daily_time, self._config.notification.timezone)
+        LOGGER.info(
+            "Duty bot is starting. Daily notifications at %s %s. Weekly schedule report at weekday=%s time=%s",
+            self._config.notification.daily_time,
+            self._config.notification.timezone,
+            self._config.notification.weekly_schedule_weekday,
+            self._config.notification.weekly_schedule_time,
+        )
+        daily_task = asyncio.create_task(self._daily_notification_loop())
+        weekly_task = asyncio.create_task(self._weekly_schedule_loop())
+        await self._stop_event.wait()
+        for task in (daily_task, weekly_task):
+            task.cancel()
+        for task in (daily_task, weekly_task):
+            with suppress(asyncio.CancelledError):
+                await task
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    async def _daily_notification_loop(self) -> None:
         while not self._stop_event.is_set():
             wait_seconds = seconds_until(self._config.notification.daily_time, self._config.notification.timezone)
-            LOGGER.info("Next notification in %.0f seconds", wait_seconds)
+            LOGGER.info("Next daily notification in %.0f seconds", wait_seconds)
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=wait_seconds)
                 break
@@ -54,8 +82,20 @@ class DutyBot:
                 pass
             await self._notify_today()
 
-    def stop(self) -> None:
-        self._stop_event.set()
+    async def _weekly_schedule_loop(self) -> None:
+        while not self._stop_event.is_set():
+            wait_seconds = seconds_until_weekly(
+                self._config.notification.weekly_schedule_weekday,
+                self._config.notification.weekly_schedule_time,
+                self._config.notification.timezone,
+            )
+            LOGGER.info("Next weekly schedule notification in %.0f seconds", wait_seconds)
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=wait_seconds)
+                break
+            except asyncio.TimeoutError:
+                pass
+            await self._notify_next_week_schedule()
 
     async def _notify_today(self) -> None:
         today = date.today()
@@ -78,6 +118,30 @@ class DutyBot:
         await self._sync_duty_group(duty_contacts)
         await self._run_session(duty_contacts)
 
+    async def _notify_next_week_schedule(self) -> None:
+        message = self._build_next_week_schedule_message()
+        await self._client.send_message(self._config.loop.channel_id, message)
+        LOGGER.info("Weekly schedule message sent")
+
+    def _build_next_week_schedule_message(self) -> str:
+        next_monday = self._next_week_monday(date.today())
+        lines = [
+            "Расписание дежурств на следующую неделю:",
+            f"Период: {next_monday.strftime('%d.%m.%Y')} - {(next_monday + timedelta(days=6)).strftime('%d.%m.%Y')}",
+            "",
+            "| День | Дежурный |",
+            "| --- | --- |",
+        ]
+        for weekday in range(7):
+            current_day = next_monday + timedelta(days=weekday)
+            contact = self._config.contact_for(current_day)
+            duty = f"{contact.full_name} (@{contact.ldap})" if contact else "Не назначен"
+            lines.append(f"| {self._WEEKDAY_LABELS[weekday]} ({current_day.strftime('%d.%m')}) | {duty} |")
+        return "\n".join(lines)
+
+    def _next_week_monday(self, today: date) -> date:
+        return today + timedelta(days=(7 - today.weekday()))
+
     async def trigger_contact(self, contact_key: str) -> bool:
         contact = self._config.contacts.get(contact_key)
         if not contact:
@@ -99,7 +163,6 @@ class DutyBot:
         await self._client.send_message(self._config.loop.channel_id, self._build_initial_message([contact]))
         LOGGER.info("Ping message for %s sent", contact_key)
         return True
-
 
     async def _sync_duty_group(self, contacts: Iterable[Contact]) -> None:
         group_id = self._config.loop.admin_group_id.strip()
@@ -186,7 +249,7 @@ class DutyBot:
         contact_list = list(contacts)
         mentions = " ".join(f"@{contact.ldap}" for contact in contact_list)
         noun = "Вы сегодня дежурные и вам необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers), ревьють PR и первично обрабатывать новые задачи на доске" if len(contact_list) > 1 else "Ты сегодня дежурный и тебе необходимо отвечать на сообщения в группе [lmru-scdp-platform-engineers](https://lemanapro.loop.ru/lemanapro/channels/lmru-scdp-platform-engineers)"
-        return f"{mentions} Доброе утро. {noun}, напишите '"'@scdp-platform-bot take'"' в данный тред для подтверждения."
+        return f"{mentions} Доброе утро. {noun}, напишите '@scdp-platform-bot take' в данный тред для подтверждения."
 
     async def _reminder_loop(self) -> None:
         interval = self._config.notification.reminder_interval_minutes * 60
@@ -206,7 +269,7 @@ class DutyBot:
             return
         mentions = " ".join(f"@{contact.ldap}" for contact in contacts_to_remind)
         noun = "ваша дежурная смена" if len(contacts_to_remind) > 1 else "твоя дежурная смена"
-        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши '"'@scdp-platform-bot take'"' в данном треде"
+        reminder_message = f"{mentions} напомню, что сегодня {noun}. Напиши '@scdp-platform-bot take' в данном треде"
         await self._client.send_message(self._config.loop.channel_id, reminder_message, root_id=self._session.thread_id)
 
     async def _poll_session_thread(self) -> None:
@@ -279,6 +342,8 @@ class DutyBot:
             LOGGER.info("Received take confirmation from %s", user_ldap)
             if user_ldap in known_ldaps:
                 self._session.acknowledged_ldaps.add(user_ldap)
+            elif bot_is_mentioned:
+                self._session.acknowledged_ldaps.update(known_ldaps)
             if all(contact.ldap in self._session.acknowledged_ldaps for contact in self._session.contacts):
                 self._session.acknowledged = True
                 self._ack_event.set()

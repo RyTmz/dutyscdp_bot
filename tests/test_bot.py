@@ -63,6 +63,8 @@ def bot_config() -> BotConfig:
         ),
         notification=NotificationSettings(
             daily_time=time(hour=8, minute=50),
+            weekly_schedule_weekday=4,
+            weekly_schedule_time=time(hour=14, minute=0),
             timezone="UTC",
             reminder_interval_minutes=1,
             weekends_alerts=True,
@@ -88,6 +90,8 @@ def dual_contacts_config() -> BotConfig:
         ),
         notification=NotificationSettings(
             daily_time=time(hour=8, minute=50),
+            weekly_schedule_weekday=4,
+            weekly_schedule_time=time(hour=14, minute=0),
             timezone="UTC",
             reminder_interval_minutes=1,
             weekends_alerts=True,
@@ -321,6 +325,8 @@ def test_notify_today_skips_weekend(bot_config: BotConfig, monkeypatch: pytest.M
         client = StubLoopClient()
         notification = NotificationSettings(
             daily_time=bot_config.notification.daily_time,
+            weekly_schedule_weekday=bot_config.notification.weekly_schedule_weekday,
+            weekly_schedule_time=bot_config.notification.weekly_schedule_time,
             timezone=bot_config.notification.timezone,
             reminder_interval_minutes=bot_config.notification.reminder_interval_minutes,
             weekends_alerts=False,
@@ -486,3 +492,31 @@ def test_multi_contact_reminder_mentions_only_unacknowledged(dual_contacts_confi
     reminder_message = asyncio.run(run())
     assert "@bob.ldap" in reminder_message
     assert "@alice.ldap" not in reminder_message
+
+
+def test_build_next_week_schedule_message(dual_contacts_config: BotConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2024, 3, 8)
+
+    bot = DutyBot(dual_contacts_config, client=StubLoopClient())
+    monkeypatch.setattr("dutyscdp_bot.bot.date", FakeDate)
+
+    message = bot._build_next_week_schedule_message()  # noqa: SLF001
+
+    assert "Расписание дежурств на следующую неделю" in message
+    assert "Период: 11.03.2024 - 17.03.2024" in message
+    assert "| Понедельник (11.03) | Alice (@alice.ldap) |" in message
+
+
+def test_notify_next_week_schedule_sends_message(dual_contacts_config: BotConfig) -> None:
+    async def run() -> list[dict]:
+        client = StubLoopClient()
+        bot = DutyBot(dual_contacts_config, client=client)
+        await bot._notify_next_week_schedule()  # noqa: SLF001
+        return client.messages
+
+    messages = asyncio.run(run())
+    assert len(messages) == 1
+    assert "Расписание дежурств на следующую неделю" in messages[0]["message"]
