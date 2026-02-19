@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import ssl
 import urllib.request
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from urllib.error import HTTPError, URLError
@@ -18,6 +20,97 @@ class OnCallClient:
         self._token = token
         self._base_url = base_url.rstrip("/")
         self._ssl_context = ssl_context
+
+    async def fetch_schedule_for_period(self, schedule_name: str, start_date: date, end_date: date) -> Dict[date, List[str]]:
+        schedule_id = await asyncio.to_thread(self._resolve_schedule_id, schedule_name)
+        if not schedule_id:
+            LOGGER.warning("Schedule %s not found in Grafana OnCall", schedule_name)
+            return {}
+        return await asyncio.to_thread(self._fetch_schedule_for_period, schedule_id, start_date, end_date)
+
+    def _fetch_schedule_for_period(self, schedule_id: str, start_date: date, end_date: date) -> Dict[date, List[str]]:
+        path = (
+            f"/api/v1/schedules/{schedule_id}/final_shifts"
+            f"?start_date={start_date.isoformat()}&end_date={end_date.isoformat()}"
+        )
+        payload = self._get_json(path)
+        items = self._extract_items(payload)
+        shifts_by_day: Dict[date, List[str]] = {}
+        for item in items:
+            shift_day = self._extract_shift_day(item)
+            if not shift_day or shift_day < start_date or shift_day > end_date:
+                continue
+            identifiers = self._extract_shift_identifiers(item)
+            if not identifiers:
+                continue
+            existing = shifts_by_day.setdefault(shift_day, [])
+            for identifier in identifiers:
+                if identifier not in existing:
+                    existing.append(identifier)
+        return shifts_by_day
+
+    def _extract_shift_day(self, item: Dict[str, Any]) -> Optional[date]:
+        raw_start = item.get("shift_start") or item.get("start") or item.get("start_at") or item.get("date")
+        if not raw_start:
+            return None
+        return self._parse_date(raw_start)
+
+    def _extract_shift_identifiers(self, item: Dict[str, Any]) -> List[str]:
+        identifiers: List[str] = []
+        for key in ("user_pk", "user_id", "id", "pk"):
+            value = item.get(key)
+            if value:
+                identifiers.append(str(value).strip())
+
+        for key in ("user_email", "email"):
+            value = item.get(key)
+            if value:
+                email = str(value).strip().lower()
+                if email:
+                    identifiers.append(email)
+                    identifiers.append(email.split("@", maxsplit=1)[0])
+
+        for key in ("user_username", "username", "user_name", "login", "name"):
+            value = item.get(key)
+            if value:
+                username = str(value).strip()
+                if username:
+                    identifiers.append(username)
+                    ids = re.findall(r"\((\d{6,})\)", username)
+                    identifiers.extend(ids)
+
+        user = item.get("user")
+        if isinstance(user, dict):
+            username = self._extract_ldap_from_user(user)
+            if username:
+                identifiers.append(username)
+
+        unique_identifiers: List[str] = []
+        seen: set[str] = set()
+        for identifier in identifiers:
+            normalized = identifier.strip()
+            if not normalized:
+                continue
+            low = normalized.lower()
+            if low in seen:
+                continue
+            seen.add(low)
+            unique_identifiers.append(normalized)
+        return unique_identifiers
+
+    def _parse_date(self, value: Any) -> Optional[date]:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        normalized = raw.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(normalized).date()
+        except ValueError:
+            pass
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
 
     async def fetch_current_oncall(self, schedule_name: str, *, limit: int = 2) -> List[str]:
         schedule_id = await asyncio.to_thread(self._resolve_schedule_id, schedule_name)
