@@ -416,14 +416,26 @@ class DutyBot:
 
     def _map_oncall_ldaps_to_contacts(self, ldaps: Iterable[str]) -> list[Contact]:
         contacts: list[Contact] = []
+        seen_contacts: set[str] = set()
         for oncall_ldap in ldaps:
-            matched = [
-                contact
-                for contact in self._config.contacts.values()
-                if contact.ldap_oncall and contact.ldap_oncall == oncall_ldap
-            ]
+            normalized = str(oncall_ldap).strip().lower()
+            if not normalized:
+                continue
+            matched = []
+            for contact in self._config.contacts.values():
+                contact_tokens = {contact.ldap.lower()}
+                if "@" in contact.ldap:
+                    contact_tokens.add(contact.ldap.split("@", maxsplit=1)[0].lower())
+                if contact.ldap_oncall:
+                    contact_tokens.add(contact.ldap_oncall.lower())
+                if normalized in contact_tokens:
+                    matched.append(contact)
             if matched:
-                contacts.extend(matched)
+                for contact in matched:
+                    if contact.key in seen_contacts:
+                        continue
+                    contacts.append(contact)
+                    seen_contacts.add(contact.key)
                 continue
             LOGGER.warning("No contact mapping for on-call ldap %s", oncall_ldap)
         return contacts
