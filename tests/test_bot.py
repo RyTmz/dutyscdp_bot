@@ -170,8 +170,12 @@ def test_any_user_acknowledgement_with_bot_mention(bot_config: BotConfig) -> Non
             "text": "@scdp-platform-bot take",
         }
         await bot.handle_event(event)
+        await asyncio.sleep(0)
+        bot.stop()
         if bot._session_task:
-            await bot._session_task
+            bot._session_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await bot._session_task
         return client.messages
 
     messages = asyncio.run(run())
@@ -219,8 +223,12 @@ def test_any_user_acknowledgement_with_structured_mentions(bot_config: BotConfig
             "mentions": [{"username": "scdp-platform-bot"}],
         }
         await bot.handle_event(event)
+        await asyncio.sleep(0)
+        bot.stop()
         if bot._session_task:
-            await bot._session_task
+            bot._session_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await bot._session_task
         return client.messages
 
     messages = asyncio.run(run())
@@ -242,8 +250,12 @@ def test_any_user_acknowledgement_with_props_mentions(bot_config: BotConfig) -> 
             "props": {"mention_keys": ["@alice", "@scdp-platform-bot"]},
         }
         await bot.handle_event(event)
+        await asyncio.sleep(0)
+        bot.stop()
         if bot._session_task:
-            await bot._session_task
+            bot._session_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await bot._session_task
         return client.messages
 
     messages = asyncio.run(run())

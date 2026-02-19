@@ -342,8 +342,6 @@ class DutyBot:
             LOGGER.info("Received take confirmation from %s", user_ldap)
             if user_ldap in known_ldaps:
                 self._session.acknowledged_ldaps.add(user_ldap)
-            elif bot_is_mentioned:
-                self._session.acknowledged_ldaps.update(known_ldaps)
             if all(contact.ldap in self._session.acknowledged_ldaps for contact in self._session.contacts):
                 self._session.acknowledged = True
                 self._ack_event.set()
